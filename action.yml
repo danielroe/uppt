@@ -1,0 +1,23 @@
+name: 'üp'
+description: 'A set of actions to manage automated releases and changelogs using conventional commits'
+author: 'Daniel Roe'
+
+# Add your action's branding here. This will appear on the GitHub Marketplace.
+branding:
+  icon: '🙌'
+  color: 'black'
+
+inputs:
+  base:
+    description: The base branch to raise the PR against.
+    required: false
+  head:
+    description: The name of the branch to create with the changes.
+    default: ci/nuxt-nightly
+  root:
+    description: The directory containing your Nuxt project.
+    default: .
+
+runs:
+  using: node24
+  main: dist/index.js
