@@ -1,0 +1,16 @@
+{
+  "name": "up-action",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Composite GitHub Action to release PRs from conventional commits, tag on merge, publish to npm via OIDC.",
+  "author": "Daniel Roe <daniel@roe.dev>",
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.2"
+  },
+  "packageManager": "pnpm@10.15.0"
+}
