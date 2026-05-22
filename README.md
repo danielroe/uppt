@@ -50,7 +50,7 @@ jobs:
       contents: write       # push the `release/vX.Y.Z` branch and delete superseded ones
       pull-requests: write  # create a release PR, update its body, close superseded PRs
     steps:
-      - uses: danielroe/uppt/pr@02a45b8fc28aebb98abf0612ba44e2a4cbb612fd # v0.3.0
+      - uses: danielroe/uppt/pr@8da0597c0c549fdfd95a9868df95feb6d04dab26 # v0.4.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -67,7 +67,7 @@ jobs:
       contents: write       # push the `vX.Y.Z` tag and create the GitHub release
       actions: write        # `gh workflow run release.yml --ref vX.Y.Z` chained dispatch
     steps:
-      - uses: danielroe/uppt/release@02a45b8fc28aebb98abf0612ba44e2a4cbb612fd # v0.3.0
+      - uses: danielroe/uppt/release@8da0597c0c549fdfd95a9868df95feb6d04dab26 # v0.4.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -82,7 +82,7 @@ jobs:
       id-token: write       # OIDC claim for npm trusted publisher
     environment: npm        # must match the trusted-publisher entry on npmjs.com
     steps:
-      - uses: danielroe/uppt/publish@02a45b8fc28aebb98abf0612ba44e2a4cbb612fd # v0.3.0
+      - uses: danielroe/uppt/publish@8da0597c0c549fdfd95a9868df95feb6d04dab26 # v0.4.0
 ```
 
 > [!IMPORTANT]
