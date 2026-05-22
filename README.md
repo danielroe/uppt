@@ -65,8 +65,6 @@ jobs:
     environment: npm        # must match the trusted-publisher entry on npmjs.com
     steps:
       - uses: danielroe/uppt@v1
-        with:
-          mode: publish
 ```
 
 ### Is `pull_request_target` safe here?
