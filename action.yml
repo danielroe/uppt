@@ -1,4 +1,4 @@
-name: 'up'
+name: 'uppt'
 description: 'Open release PRs from conventional commits, tag on merge, publish to npm via OIDC.'
 author: 'Daniel Roe'
 

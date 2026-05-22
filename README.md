@@ -1,4 +1,4 @@
-# up-action
+# uppt
 
 A composite GitHub Action that turns conventional commits into a draft release PR, tags the PR on merge, and stages publishing to npm via OIDC trusted publishing.
 
@@ -30,7 +30,7 @@ jobs:
       contents: write       # push the `release/vX.Y.Z` branch and delete superseded ones
       pull-requests: write  # create a release PR, update its body, close superseded PRs
     steps:
-      - uses: danielroe/up-action@v1
+      - uses: danielroe/uppt@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -48,7 +48,7 @@ jobs:
       contents: write       # push the `vX.Y.Z` tag and create the GitHub release
       actions: write        # `gh workflow run release.yml --ref vX.Y.Z` chained dispatch
     steps:
-      - uses: danielroe/up-action@v1
+      - uses: danielroe/uppt@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -63,7 +63,7 @@ jobs:
       id-token: write       # OIDC claim for npm trusted publisher
     environment: npm        # matches the trusted-publisher entry on npmjs.com
     steps:
-      - uses: danielroe/up-action@v1
+      - uses: danielroe/uppt@v1
         with:
           mode: publish
 ```

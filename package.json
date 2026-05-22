@@ -1,5 +1,5 @@
 {
-  "name": "up-action",
+  "name": "uppt",
   "version": "0.0.1",
   "private": true,
   "description": "Composite GitHub Action to release PRs from conventional commits, tag on merge, publish to npm via OIDC.",
