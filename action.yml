@@ -135,6 +135,21 @@ runs:
       shell: bash
       run: npm install -g npm@latest
 
+    - name: Install dependencies
+      if: steps.mode.outputs.mode == 'publish'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -f pnpm-lock.yaml ]; then
+          pnpm install --frozen-lockfile --ignore-scripts
+        elif [ -f yarn.lock ]; then
+          yarn install --immutable --mode=skip-build || yarn install --frozen-lockfile --ignore-scripts
+        elif [ -f package-lock.json ]; then
+          npm ci --ignore-scripts
+        else
+          npm install --ignore-scripts --no-package-lock
+        fi
+
     - name: Update changelog and open/update release PR
       if: steps.mode.outputs.mode == 'pr'
       shell: bash
