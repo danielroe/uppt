@@ -31,7 +31,7 @@ jobs:
       contents: write       # push the `release/vX.Y.Z` branch and delete superseded ones
       pull-requests: write  # create a release PR, update its body, close superseded PRs
     steps:
-      - uses: danielroe/uppt@v1
+      - uses: danielroe/uppt@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -49,7 +49,7 @@ jobs:
       contents: write       # push the `vX.Y.Z` tag and create the GitHub release
       actions: write        # `gh workflow run release.yml --ref vX.Y.Z` chained dispatch
     steps:
-      - uses: danielroe/uppt@v1
+      - uses: danielroe/uppt@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -64,8 +64,11 @@ jobs:
       id-token: write       # OIDC claim for npm trusted publisher
     environment: npm        # must match the trusted-publisher entry on npmjs.com
     steps:
-      - uses: danielroe/uppt@v1
+      - uses: danielroe/uppt@main
 ```
+
+> [!IMPORTANT]
+> Once you add this workflow, it is strongly recommended to run `npx pin-github-action .github/workflows/release.yml` to pin the action's version to a SHA.
 
 ### Is `pull_request_target` safe here?
 
