@@ -40,9 +40,9 @@ on:
 permissions: {}
 
 jobs:
-  # `pr` mode: parse commits since the last tag, push a `release/vX.Y.Z`
-  # branch, open or update a draft release PR, and close any superseded
-  # release PRs (e.g. `release/v1.0.1` when the bump is now `release/v1.1.0`).
+  # Parse commits since the last tag, push a `release/vX.Y.Z` branch, open
+  # or update a draft release PR, and close any superseded release PRs
+  # (e.g. `release/v1.0.1` when the bump is now `release/v1.1.0`).
   pr:
     if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
@@ -50,14 +50,13 @@ jobs:
       contents: write       # push the `release/vX.Y.Z` branch and delete superseded ones
       pull-requests: write  # create a release PR, update its body, close superseded PRs
     steps:
-      - uses: danielroe/uppt@main
+      - uses: danielroe/uppt/pr@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  # `release` mode: the release PR was merged. Tag the squash commit, cut a
-  # GitHub release from the PR body, dispatch the publish workflow. The
-  # `release/v` head-ref guard is what keeps regular feature-PR merges from
-  # triggering a tag attempt.
+  # The release PR was merged: tag the squash commit, cut a GitHub release
+  # from the PR body, and dispatch the publish workflow. The `release/v`
+  # head-ref guard keeps regular feature-PR merges from triggering this.
   release:
     if: |
       github.event_name == 'pull_request_target'
@@ -68,13 +67,13 @@ jobs:
       contents: write       # push the `vX.Y.Z` tag and create the GitHub release
       actions: write        # `gh workflow run release.yml --ref vX.Y.Z` chained dispatch
     steps:
-      - uses: danielroe/uppt@main
+      - uses: danielroe/uppt/release@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  # `publish` mode: the chained dispatch from `release` lands here as a
-  # `workflow_dispatch` event on a `vX.Y.Z` tag ref. Manual recovery uses
-  # the same path (Run workflow -> pick a `v*` tag).
+  # The chained dispatch from `release` lands here as a `workflow_dispatch`
+  # event on a `vX.Y.Z` tag ref. Manual recovery uses the same path
+  # (Run workflow -> pick a `v*` tag).
   publish:
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -83,11 +82,11 @@ jobs:
       id-token: write       # OIDC claim for npm trusted publisher
     environment: npm        # must match the trusted-publisher entry on npmjs.com
     steps:
-      - uses: danielroe/uppt@main
+      - uses: danielroe/uppt/publish@main
 ```
 
 > [!IMPORTANT]
-> Once you add this workflow, it is strongly recommended to run `npx pin-github-action .github/workflows/release.yml` to pin the action's version to a SHA.
+> Once you add this workflow, it is strongly recommended to run `npx pin-github-action .github/workflows/release.yml` to pin each subaction's version to a SHA.
 
 ### Is `pull_request_target` safe here?
 
@@ -100,32 +99,40 @@ jobs:
 
 ## What it does
 
-### Creates a PR (`pr`)
+### Creates a PR (`danielroe/uppt/pr`)
 
 Whenever you push to the default branch, this action parses conventional commits since the latest semver tag, decides the next bump (major, minor or patch) and creates a `release/vX.Y.Z` branch with the version bump, and opens or updates a draft PR against the base branch.
 
 > [!TIP]
 > You can edit this PR to add your own release notes. Anything above `## 👉 Changelog` is preserved when the changelog is updated.
 
-### Creates a release (`release`)
+| Input | Default | Description |
+| --- | --- | --- |
+| `token` | `${{ github.token }}` | GitHub token. Needs `contents: write` and `pull-requests: write`. |
+| `base-branch` | default branch | Base branch for the release PR. |
+| `node-version` | `24` | Node version for the scripts. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). |
+| `checkout` | `true` | Set to `false` if the caller has already checked out with `fetch-depth: 0`. |
 
-When you merge a release PR, the action tags that commit, creates a GitHub Release using the PR body as notes, then dispatches the publish workflow on the new tag.
+### Creates a release (`danielroe/uppt/release`)
 
-### Stages a publish (`publish`)
-
-This runs `pnpm pack` (if you have a `pnpm-lock.yaml`) and then runs `npm stage publish` with OIDC authentication. The staged version then needs to be approved by a maintainer with 2FA on npmjs.com before it goes live.
-
-## Inputs
+When you merge a release PR, this subaction tags that commit, creates a GitHub Release using the PR body as notes, then dispatches the publish workflow on the new tag.
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `mode` | `auto` | `auto`, `pr`, `release`, or `publish`. |
-| `token` | `${{ github.token }}` | Required for `release`; recommended for `pr`. Not used by `publish`. |
-| `base-branch` | default branch | Base branch for the release PR. |
-| `node-version` | `24` | Node version used for the scripts and for `publish`. Needs to support `--experimental-strip-types` (Node 22.6+, 24+ recommended). |
-| `npm-access` | `public` | npm access level (`public` or `restricted`). |
+| `token` | `${{ github.token }}` | GitHub token. Needs `contents: write` and `actions: write`. |
+| `node-version` | `24` | Node version for the scripts. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). |
 | `publish-workflow` | `release.yml` | Workflow filename to dispatch after tagging. Must declare `workflow_dispatch`. |
-| `checkout` | `true` | Set to `false` if the caller has already checked out the right ref. |
+| `checkout` | `true` | Set to `false` if the caller has already checked out `github.event.pull_request.merge_commit_sha`. |
+
+### Stages a publish (`danielroe/uppt/publish`)
+
+This subaction runs `pnpm pack` (if you have a `pnpm-lock.yaml`) and then runs `npm stage publish` with OIDC authentication. The staged version then needs to be approved by a maintainer with 2FA on npmjs.com before it goes live.
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `node-version` | `24` | Node version for the scripts and for `npm stage publish`. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). |
+| `npm-access` | `public` | npm access level (`public` or `restricted`). |
+| `checkout` | `true` | Set to `false` if the caller has already checked out the tag ref. |
 
 ## Prerequisites
 

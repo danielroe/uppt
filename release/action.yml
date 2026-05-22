@@ -1,0 +1,70 @@
+name: 'uppt/release'
+description: 'Tag a merged release PR, cut a GitHub release from the PR body, and dispatch the publish workflow.'
+author: 'Daniel Roe'
+
+branding:
+  icon: 'tag'
+  color: 'black'
+
+inputs:
+  token:
+    description: 'GitHub token. Needs `contents: write` (tag + release) and `actions: write` (workflow dispatch).'
+    required: false
+    default: ${{ github.token }}
+  node-version:
+    description: 'Node version for the scripts. Needs `--experimental-strip-types` support (22.6+, 24+ recommended).'
+    required: false
+    default: '24'
+  publish-workflow:
+    description: 'Workflow filename to dispatch after tagging (must accept `workflow_dispatch`).'
+    required: false
+    default: 'release.yml'
+  checkout:
+    description: 'Whether the action should run `actions/checkout` itself. Set to `false` if the caller has already checked out `github.event.pull_request.merge_commit_sha` with `fetch-depth: 0`.'
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Validate event
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        PR_MERGED: ${{ github.event.pull_request.merged }}
+        PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      run: |
+        set -euo pipefail
+        if [ "$EVENT_NAME" != "pull_request_target" ]; then
+          echo "::error::danielroe/uppt/release only supports 'pull_request_target', got '$EVENT_NAME'."
+          exit 1
+        fi
+        if [ "$PR_MERGED" != "true" ]; then
+          echo "::error::danielroe/uppt/release requires the PR to be merged."
+          exit 1
+        fi
+        if [ "${PR_HEAD_REF#release/v}" = "$PR_HEAD_REF" ]; then
+          echo "::error::danielroe/uppt/release expected a 'release/v*' head ref, got '$PR_HEAD_REF'."
+          exit 1
+        fi
+
+    - name: Checkout
+      if: inputs.checkout == 'true'
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      with:
+        fetch-depth: 0
+        ref: ${{ github.event.pull_request.merge_commit_sha }}
+        token: ${{ inputs.token }}
+
+    - name: Setup Node
+      uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Tag merged release PR and dispatch publish
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        PR_BODY: ${{ github.event.pull_request.body }}
+        PUBLISH_WORKFLOW: ${{ inputs.publish-workflow }}
+      run: node --experimental-strip-types ${{ github.action_path }}/../scripts/tag-and-release.ts

@@ -1,0 +1,58 @@
+name: 'uppt/pr'
+description: 'Parse conventional commits since the last tag and open or update a draft release PR.'
+author: 'Daniel Roe'
+
+branding:
+  icon: 'git-pull-request'
+  color: 'black'
+
+inputs:
+  token:
+    description: 'GitHub token. Needs `contents: write` and `pull-requests: write`.'
+    required: false
+    default: ${{ github.token }}
+  base-branch:
+    description: 'Branch the release PR is opened against.'
+    required: false
+    default: ${{ github.event.repository.default_branch }}
+  node-version:
+    description: 'Node version for the scripts. Needs `--experimental-strip-types` support (22.6+, 24+ recommended).'
+    required: false
+    default: '24'
+  checkout:
+    description: 'Whether the action should run `actions/checkout` itself. Set to `false` if the caller has already checked out with `fetch-depth: 0`.'
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Validate event
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+      run: |
+        set -euo pipefail
+        if [ "$EVENT_NAME" != "push" ] && [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+          echo "::error::danielroe/uppt/pr only supports 'push' and 'workflow_dispatch' events, got '$EVENT_NAME'."
+          exit 1
+        fi
+
+    - name: Checkout
+      if: inputs.checkout == 'true'
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      with:
+        fetch-depth: 0
+        token: ${{ inputs.token }}
+
+    - name: Setup Node
+      uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Update changelog and open/update release PR
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        RELEASE_BASE: ${{ inputs.base-branch }}
+      run: node --experimental-strip-types ${{ github.action_path }}/../scripts/update-changelog.ts

@@ -1,0 +1,80 @@
+name: 'uppt/publish'
+description: 'Pack and stage-publish to npm using OIDC trusted publishing.'
+author: 'Daniel Roe'
+
+branding:
+  icon: 'package'
+  color: 'black'
+
+inputs:
+  node-version:
+    description: 'Node version for the scripts and for `npm stage publish`. Needs `--experimental-strip-types` support (22.6+, 24+ recommended).'
+    required: false
+    default: '24'
+  npm-access:
+    description: 'npm access level (`public` or `restricted`).'
+    required: false
+    default: 'public'
+  checkout:
+    description: 'Whether the action should run `actions/checkout` itself. Set to `false` if the caller has already checked out the tag ref.'
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Validate event
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+      run: |
+        set -euo pipefail
+        case "$EVENT_NAME" in
+          push|workflow_dispatch) ;;
+          *)
+            echo "::error::danielroe/uppt/publish only supports 'push' and 'workflow_dispatch' events, got '$EVENT_NAME'."
+            exit 1
+            ;;
+        esac
+        if [ "${GITHUB_REF:-}" = "${GITHUB_REF#refs/tags/v}" ]; then
+          echo "::error::danielroe/uppt/publish expected a 'refs/tags/v*' ref, got '${GITHUB_REF:-<unset>}'."
+          exit 1
+        fi
+
+    - name: Checkout
+      if: inputs.checkout == 'true'
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+    - name: Enable corepack
+      shell: bash
+      run: corepack enable
+
+    - name: Setup Node
+      uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        registry-url: 'https://registry.npmjs.org'
+
+    - name: Update npm
+      shell: bash
+      run: npm install -g npm@latest
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -f pnpm-lock.yaml ]; then
+          pnpm install --frozen-lockfile --ignore-scripts
+        elif [ -f yarn.lock ]; then
+          yarn install --immutable --mode=skip-build || yarn install --frozen-lockfile --ignore-scripts
+        elif [ -f package-lock.json ]; then
+          npm ci --ignore-scripts
+        else
+          npm install --ignore-scripts --no-package-lock
+        fi
+
+    - name: Publish to npm
+      shell: bash
+      env:
+        NPM_ACCESS: ${{ inputs.npm-access }}
+      run: node --experimental-strip-types ${{ github.action_path }}/../scripts/publish.ts
