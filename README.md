@@ -4,7 +4,26 @@
 
 The aim of **uppt** is to make a very simple, secure release workflow for maintainers which adheres to best security practices and doesn't require tokens or trusting a third-party GitHub App. It was extracted from scripts used in [nuxt/nuxt](https://github.com/nuxt/nuxt).
 
-## Usage
+## Getting started
+
+`uppt` is designed to be used with an opinionated set of security best practices. Here is how to use it.
+
+### Set up your package for trusted publishing on npmjs.com
+
+1. Visit https://npmjs.com/<package-name>/settings and add a new trusted publisher entry, pointing at your repo and the `release.yml` workflow, with the `npm stage publish` permission chip.  Set the 'Environment name' to 'npm'.
+
+> [!NOTE]
+> [Staged publishing](https://docs.npmjs.com/staged-publishing/) requires you to approve the publish before it goes live.
+
+> [!TIP]
+> It is recommended also to set "Require two-factor authentication and disallow tokens."
+
+![a screenshot of npmjs.com](https://raw.githubusercontent.com/danielroe/uppt/main/assets/trusted-publisher.png)
+
+2. Create a [GitHub environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments) named `npm`. You can scope it to `v*` tags, and configure any restrictions on it (such as requiring approvals if you want).
+   ![a screenshot of github environment configuration settings](https://raw.githubusercontent.com/danielroe/uppt/main/assets/trusted-publisher.png)
+
+**3.** Add the following workflow to your repo in `.github/workflows/release.yml`, and you're done!
 
 ```yaml
 name: release
