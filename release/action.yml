@@ -35,8 +35,8 @@ runs:
         PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
       run: |
         set -euo pipefail
-        if [ "$EVENT_NAME" != "pull_request_target" ]; then
-          echo "::error::danielroe/uppt/release only supports 'pull_request_target', got '$EVENT_NAME'."
+        if [ "$EVENT_NAME" != "pull_request" ]; then
+          echo "::error::danielroe/uppt/release only supports 'pull_request', got '$EVENT_NAME'."
           exit 1
         fi
         if [ "$PR_MERGED" != "true" ]; then

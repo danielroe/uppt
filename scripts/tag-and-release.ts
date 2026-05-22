@@ -1,8 +1,8 @@
 // Tag the squash-merge commit, create a GitHub release from the PR body,
 // and dispatch the publish workflow.
 //
-// Runs on `pull_request_target: closed` after the caller's workflow has
-// checked out the merge commit (`ref: github.event.pull_request.merge_commit_sha`).
+// Runs on `pull_request: closed` after the caller's workflow has checked
+// out the merge commit (`ref: github.event.pull_request.merge_commit_sha`).
 // The version is read from `package.json` at that ref, not from the branch name.
 //
 // Env:
@@ -26,8 +26,7 @@ function main () {
 
   const pkgPath = resolve(process.cwd(), 'package.json')
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string }
-  // Runs under `pull_request_target`, so `pkg.version` is attacker-influenced.
-  // Pin to strict semver before letting it flow into `git tag` / `gh` argv to
+  // `pkg.version` flows into `git tag` and `gh` argv. Pin to strict semver to
   // rule out flag-injection (`--upload-pack=...`) and ref-confusion attacks.
   if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(pkg.version)) {
     throw new Error(`Refusing to tag: package.json version "${pkg.version}" is not strict semver`)

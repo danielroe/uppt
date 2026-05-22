@@ -31,7 +31,7 @@ name: release
 on:
   push:
     branches: [main]
-  pull_request_target:
+  pull_request:
     types: [closed]
     branches: [main]
   # this is required to trigger releases when the release PR is merged, or to rerun a release if needed
@@ -59,7 +59,7 @@ jobs:
   # head-ref guard keeps regular feature-PR merges from triggering this.
   release:
     if: |
-      github.event_name == 'pull_request_target'
+      github.event_name == 'pull_request'
       && github.event.pull_request.merged == true
       && startsWith(github.event.pull_request.head.ref, 'release/v')
     runs-on: ubuntu-latest
@@ -87,15 +87,6 @@ jobs:
 
 > [!IMPORTANT]
 > Once you add this workflow, it is strongly recommended to run `npx pin-github-action .github/workflows/release.yml` to pin each subaction's version to a SHA.
-
-### Is `pull_request_target` safe here?
-
-`pull_request_target` is a well-known footgun, but is used safely in this action:
-
-- It checks out the squash commit on the default branch, not the PR.
-- It does not install dependencies or run anything from the codebase being released.
-- It reads a single value from the codebase - `package.json#version` - which is validated against a strict semver regex.
-- All subprocess calls use `execFileSync` with argv arrays, and the generated PR body is passed as an env var and forwarded to `gh release create --notes` as a single arg.
 
 ## What it does
 
