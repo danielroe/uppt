@@ -1,6 +1,8 @@
 # uppt
 
-A composite GitHub Action that turns conventional commits into a draft release PR, tags the PR on merge, and stages publishing to npm via OIDC trusted publishing.
+> A composite GitHub Action that turns conventional commits into a draft release PR, tags the PR on merge, and stages publishing to npm via OIDC trusted publishing.
+
+The aim of **uppt** is to make a very simple, secure release workflow for maintainers which adheres to best security practices and doesn't require tokens or trusting a third-party GitHub App. It was extracted from scripts used in [nuxt/nuxt](https://github.com/nuxt/nuxt).
 
 ## Usage
 
@@ -13,8 +15,7 @@ on:
   pull_request_target:
     types: [closed]
     branches: [main]
-  # Required: `release` mode chains into `publish` via `gh workflow run`, which
-  # fires `workflow_dispatch`. Also serves as the manual publish-recovery entry point.
+  # this is required to trigger releases when the release PR is merged, or to rerun a release if needed
   workflow_dispatch:
 
 permissions: {}
@@ -61,7 +62,7 @@ jobs:
     permissions:
       contents: read        # checkout the tag
       id-token: write       # OIDC claim for npm trusted publisher
-    environment: npm        # matches the trusted-publisher entry on npmjs.com
+    environment: npm        # must match the trusted-publisher entry on npmjs.com
     steps:
       - uses: danielroe/uppt@v1
         with:
@@ -70,24 +71,29 @@ jobs:
 
 ### Is `pull_request_target` safe here?
 
-`pull_request_target` is the well-known footgun: it runs in the target branch's context, with write permissions and access to secrets, and the classic exploit is checking out the PR head and running build or test scripts from attacker-controlled code.
+`pull_request_target` is a well-known footgun, but is used safely in this action:
 
-The `release` job avoids that pattern. Concretely:
-
-- It checks out `github.event.pull_request.merge_commit_sha` (the squash commit on the default branch, created after the maintainer approved and clicked merge). It never checks out `head.sha`.
-- It does not run `npm install`, `pnpm install`, `postinstall`, or any build / test scripts from the merged code. The only thing it executes is `node scripts/tag-and-release.ts` from `${{ github.action_path }}`, which is this action's pinned checkout, not the consumer repo's.
-- The single value it reads from the merged code is `package.json#version`, and it is validated against a strict semver regex before flowing into `git tag` / `gh` argv. Flag-injection (`--upload-pack=...`) and ref-confusion attacks are blocked at that gate.
-- All subprocess calls use `execFileSync` with argv arrays, never `execSync` or shell interpolation. `PR_BODY` is passed as an env var and forwarded to `gh release create --notes` as a single argv, so backtick / `$()` content in a PR body is inert.
-
-In short: the only attacker-controlled input that reaches a subprocess is the semver-validated package version, passed argv-not-shell.
+- It checks out the squash commit on the default branch, not the PR.
+- It does not install dependencies or run anything from the codebase being released.
+- It reads a single value from the codebase - `package.json#version` - which is validated against a strict semver regex.
+- All subprocess calls use `execFileSync` with argv arrays, and the generated PR body is passed as an env var and forwarded to `gh release create --notes` as a single arg.
 
 ## What it does
 
-- **`pr`** (push to default branch): parses conventional commits since the latest semver tag, decides the next bump (`major` / `minor` / `patch`), pushes a `release/vX.Y.Z` branch with the version bump as `github-actions[bot]`, and opens or updates a draft PR against the base branch. The PR body uses `## 👉 Changelog` as a marker; text above the marker is preserved across updates. If a subsequent commit shifts the target version (e.g. a `feat:` lands after a patch PR was opened), the stale PR is closed, its branch deleted, and its preamble carried into the new PR. Superseded-PR cleanup is scoped to the same base branch, so a repo with maintenance branches (e.g. `main`, `4.x`, `3.x`) can have a release PR open against each one without them clobbering each other.
-- **`release`** (`pull_request_target: closed` from a merged PR): reads the version from `package.json` at the merge commit, tags that commit, creates a GitHub Release using the PR body as notes, then dispatches the publish workflow on the new tag.
-- **`publish`** (`push: tags: ['v*']`, `workflow_dispatch` on a tag): if `pnpm-lock.yaml` is present, runs `pnpm pack` (so `catalog:` specifiers resolve) then `npm stage publish ./<tarball>.tgz --provenance --access <access>`. Otherwise runs `npm stage publish --provenance --access <access>` from source. Always `npm stage publish`, never `npm publish`. OIDC trusted publishing, no `NPM_TOKEN`. The maintainer approves the staged version with 2FA on npmjs.com afterwards.
+### Creates a PR (`pr`)
 
-Mode is auto-detected from `github.event_name` by default; set `mode:` explicitly to override.
+Whenever you push to the default branch, this action parses conventional commits since the latest semver tag, decides the next bump (major, minor or patch) and creates a `release/vX.Y.Z` branch with the version bump, and opens or updates a draft PR against the base branch.
+
+> [!TIP]
+> You can edit this PR to add your own release notes. Anything above `## 👉 Changelog` is preserved when the changelog is updated.
+
+### Creates a release (`release`)
+
+When you merge a release PR, the action tags that commit, creates a GitHub Release using the PR body as notes, then dispatches the publish workflow on the new tag.
+
+### Stages a publish (`publish`)
+
+This runs `pnpm pack` (if you have a `pnpm-lock.yaml`) and then runs `npm stage publish` with OIDC authentication. The staged version then needs to be approved by a maintainer with 2FA on npmjs.com before it goes live.
 
 ## Inputs
 
@@ -109,6 +115,17 @@ For `publish` to work end to end you need:
 - A GitHub environment named `npm` (or whichever name you put on the publish job).
 - The package must already exist on npmjs.com; `npm stage publish` cannot stage a brand-new package.
 
+## Credits
+
+Inspired by [unjs/changelogen](https://github.com/unjs/changelogen) and [antfu/changelogithub](https://github.com/antfu/changelogithub/).
+
+There are also a number of other actions and workflows you might want to check out, including:
+
+- [changesets](https://github.com/changesets/changesets)
+- [release-please](https://github.com/googleapis/release-please)
+
 ## License
 
-[MIT](./LICENSE)
+Made with ❤️
+
+Published under [MIT License](./LICENCE).
