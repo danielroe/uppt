@@ -6,11 +6,11 @@
   "author": "Daniel Roe <daniel@roe.dev>",
   "license": "MIT",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "test:types": "tsgo --noEmit"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "typescript": "^5.9.2"
+    "@typescript/native-preview": "7.0.0-dev.20260421.2"
   },
   "packageManager": "pnpm@10.15.0"
 }
