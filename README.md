@@ -10,7 +10,7 @@ The aim of **uppt** is to make a very simple, secure release workflow for mainta
 
 ### Set up your package for trusted publishing on npmjs.com
 
-1. Visit https://npmjs.com/<package-name>/settings and add a new trusted publisher entry, pointing at your repo and the `release.yml` workflow, with the `npm stage publish` permission chip.  Set the 'Environment name' to 'npm'.
+1. Visit `https://npmjs.com/<package-name>/settings` and add a new trusted publisher entry, pointing at your repo and the `release.yml` workflow, with the `npm stage publish` permission chip.  Set the 'Environment name' to 'npm'.
 
 > [!NOTE]
 > [Staged publishing](https://docs.npmjs.com/staged-publishing/) requires you to approve the publish before it goes live.
