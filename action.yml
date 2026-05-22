@@ -1,4 +1,4 @@
-name: 'up-action'
+name: 'up'
 description: 'Open release PRs from conventional commits, tag on merge, publish to npm via OIDC.'
 author: 'Daniel Roe'
 
