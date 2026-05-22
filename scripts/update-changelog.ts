@@ -278,10 +278,32 @@ async function getContributors (
   return out
 }
 
+async function isReleaseMergeCommit (
+  repo: { owner: string, repo: string },
+  sha: string,
+): Promise<boolean> {
+  // We don't want to update the changelog when a `release/vX.Y.Z` PR is merged.
+  try {
+    const prs = await gh<Array<{ head: { ref: string }, merged_at: string | null }>>(
+      `/repos/${repo.owner}/${repo.repo}/commits/${sha}/pulls`,
+    )
+    return prs.some(pr => pr.merged_at && pr.head.ref.startsWith('release/v'))
+  } catch {
+    return false
+  }
+}
+
 async function main () {
   const dryRun = Boolean(process.env.DRY_RUN)
   const repo = getRepo()
   const baseBranch = getCurrentBranch()
+
+  const headSha = git('rev-parse', 'HEAD')
+  if (await isReleaseMergeCommit(repo, headSha)) {
+    console.log(`HEAD (${headSha.slice(0, 7)}) is the merge of a release PR; skipping.`)
+    return
+  }
+
   const latestTag = getLatestTag()
 
   const commits = getCommitsSince(latestTag).filter(
