@@ -1,0 +1,33 @@
+name: pin-readme
+
+# After a release tag lands, rewrite the `uses: danielroe/uppt/*@<ref>`
+# lines in README.md to pin to the new tag's SHA and commit straight
+# to main. See scripts/pin-readme.ts for the rewrite logic.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # push the README update directly to main
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24'
+
+      - name: Pin README and push to main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/pin-readme.ts
