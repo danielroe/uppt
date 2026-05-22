@@ -33,6 +33,8 @@ runs:
         EVENT_NAME: ${{ github.event_name }}
         PR_MERGED: ${{ github.event.pull_request.merged }}
         PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        BASE_REPO: ${{ github.repository }}
       run: |
         set -euo pipefail
         if [ "$EVENT_NAME" != "pull_request" ]; then
@@ -45,6 +47,10 @@ runs:
         fi
         if [ "${PR_HEAD_REF#release/v}" = "$PR_HEAD_REF" ]; then
           echo "::error::danielroe/uppt/release expected a 'release/v*' head ref, got '$PR_HEAD_REF'."
+          exit 1
+        fi
+        if [ "$PR_HEAD_REPO" != "$BASE_REPO" ]; then
+          echo "::error::danielroe/uppt/release requires the release PR to originate from this repository (got '$PR_HEAD_REPO', expected '$BASE_REPO'). Add 'github.event.pull_request.head.repo.full_name == github.repository' to the release job's if: condition to skip fork PRs at the workflow level."
           exit 1
         fi
 
