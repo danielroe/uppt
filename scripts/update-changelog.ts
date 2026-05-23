@@ -278,33 +278,26 @@ async function getContributors (
   return out
 }
 
-async function isReleaseMergeCommit (
-  repo: { owner: string, repo: string },
-  sha: string,
-): Promise<boolean> {
-  // We don't want to update the changelog when a `release/vX.Y.Z` PR is merged.
-  try {
-    const prs = await gh<Array<{ head: { ref: string }, merged_at: string | null }>>(
-      `/repos/${repo.owner}/${repo.repo}/commits/${sha}/pulls`,
-    )
-    return prs.some(pr => pr.merged_at && pr.head.ref.startsWith('release/v'))
-  } catch {
-    return false
-  }
-}
-
 async function main () {
   const dryRun = Boolean(process.env.DRY_RUN)
   const repo = getRepo()
   const baseBranch = getCurrentBranch()
 
-  const headSha = git('rev-parse', 'HEAD')
-  if (await isReleaseMergeCommit(repo, headSha)) {
-    console.log(`HEAD (${headSha.slice(0, 7)}) is the merge of a release PR; skipping.`)
+  const latestTag = getLatestTag()
+
+  const pkgPath = resolve(process.cwd(), 'package.json')
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+
+  // Skip when `package.json` is out of sync with the latest tag. This is true
+  // in the window between a release PR's merge updating `pkg.version` on the
+  // base branch and the parallel `release` job pushing the matching tag — the
+  // exact transitional state where we don't want to open a new release PR.
+  // The symmetric case (tag already at HEAD) is handled by the `!commits.length`
+  // early-exit below.
+  if (latestTag && pkg.version !== latestTag.name.replace(/^v/, '')) {
+    console.log(`pkg.version ${pkg.version} differs from latest tag ${latestTag.name}; skipping (release likely in flight).`)
     return
   }
-
-  const latestTag = getLatestTag()
 
   const commits = getCommitsSince(latestTag).filter(
     c => KNOWN_TYPES.has(c.type) && !(c.type === 'chore' && c.scope === 'deps'),
@@ -315,8 +308,6 @@ async function main () {
     return
   }
 
-  const pkgPath = resolve(process.cwd(), 'package.json')
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
   const bump = determineBump(commits)
   const newVersion = incVersion(pkg.version, bump)
   const releaseBranch = `release/v${newVersion}`
