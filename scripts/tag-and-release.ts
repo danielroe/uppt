@@ -20,33 +20,62 @@ function run (cmd: string, args: string[], opts: { env?: NodeJS.ProcessEnv } = {
   execFileSync(cmd, args, { stdio: 'inherit', env: { ...process.env, ...opts.env } })
 }
 
+function capture (cmd: string, args: string[], env?: NodeJS.ProcessEnv): string {
+  return execFileSync(cmd, args, { encoding: 'utf8', env: { ...process.env, ...env } }).trim()
+}
+
+function tagExists (repo: string, tag: string, env: NodeJS.ProcessEnv): boolean {
+  // `gh api` exits non-zero on 404; treat that as "does not exist". Any other
+  // failure (auth, network) we want to propagate, so we re-check by asking gh
+  // to ignore HTTP errors and inspect the JSON.
+  try {
+    const out = execFileSync(
+      'gh',
+      ['api', '-H', 'Accept: application/vnd.github+json', `/repos/${repo}/git/ref/tags/${tag}`],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } },
+    )
+    return Boolean(out.trim())
+  } catch {
+    return false
+  }
+}
+
 function main () {
   const token = process.env.GITHUB_TOKEN
   if (!token) throw new Error('GITHUB_TOKEN is required')
+  const repo = process.env.GITHUB_REPOSITORY
+  if (!repo || !repo.includes('/')) throw new Error('GITHUB_REPOSITORY is required')
 
   const pkgPath = resolve(process.cwd(), 'package.json')
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string }
-  // `pkg.version` flows into `git tag` and `gh` argv. Pin to strict semver to
+  // `pkg.version` flows into ref names and `gh` argv. Pin to strict semver to
   // rule out flag-injection (`--upload-pack=...`) and ref-confusion attacks.
   if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(pkg.version)) {
     throw new Error(`Refusing to tag: package.json version "${pkg.version}" is not strict semver`)
   }
   const tag = `v${pkg.version}`
+  const ghEnv = { GH_TOKEN: token }
 
-  run('git', ['config', 'user.email', 'github-actions[bot]@users.noreply.github.com'])
-  run('git', ['config', 'user.name', 'github-actions[bot]'])
-  run('git', ['tag', tag])
-  run('git', ['push', 'origin', tag])
+  if (tagExists(repo, tag, ghEnv)) {
+    throw new Error(`Refusing to tag: ${tag} already exists on ${repo}. If this is a rerun, delete the tag and the release first, or bump the version.`)
+  }
+
+  // Create the tag via the GitHub API instead of `git push`, so this step
+  // doesn't need git-level write credentials baked into the runner.
+  const sha = capture('git', ['rev-parse', 'HEAD'])
+  run('gh', [
+    'api', '-X', 'POST',
+    '-H', 'Accept: application/vnd.github+json',
+    `/repos/${repo}/git/refs`,
+    '-f', `ref=refs/tags/${tag}`,
+    '-f', `sha=${sha}`,
+  ], { env: ghEnv })
 
   const body = process.env.PR_BODY ?? ''
-  run('gh', ['release', 'create', tag, '--title', tag, '--notes', body], {
-    env: { GH_TOKEN: token },
-  })
+  run('gh', ['release', 'create', tag, '--title', tag, '--notes', body], { env: ghEnv })
 
   const workflow = process.env.PUBLISH_WORKFLOW || 'release.yml'
-  run('gh', ['workflow', 'run', workflow, '--ref', tag], {
-    env: { GH_TOKEN: token },
-  })
+  run('gh', ['workflow', 'run', workflow, '--ref', tag], { env: ghEnv })
 
   console.log(`Tagged ${tag}, created release, dispatched ${workflow}.`)
 }
