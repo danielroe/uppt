@@ -56,12 +56,14 @@ jobs:
 
   # The release PR was merged: tag the squash commit, cut a GitHub release
   # from the PR body, and dispatch the publish workflow. The `release/v`
-  # head-ref guard keeps regular feature-PR merges from triggering this.
+  # head-ref guard keeps regular feature-PR merges from triggering this;
+  # the head-repo guard keeps merged fork PRs from triggering it.
   release:
     if: |
       github.event_name == 'pull_request'
       && github.event.pull_request.merged == true
       && startsWith(github.event.pull_request.head.ref, 'release/v')
+      && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: write       # push the `vX.Y.Z` tag and create the GitHub release
