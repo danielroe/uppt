@@ -67,6 +67,9 @@ jobs:
       && startsWith(github.event.pull_request.head.ref, 'release/v')
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     permissions:
       contents: write       # push the `vX.Y.Z` tag and create the GitHub release
       actions: write        # `gh workflow run release.yml --ref vX.Y.Z` chained dispatch
@@ -81,6 +84,9 @@ jobs:
   publish:
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: read        # checkout the tag
       id-token: write       # OIDC claim for npm trusted publisher
