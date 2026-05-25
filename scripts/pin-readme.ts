@@ -39,7 +39,7 @@ function rewrite (readme: string, sha: string, tag: string) {
   // Match `uses: danielroe/uppt/<sub>@<ref>` optionally followed by a `#
   // <version>` trailing comment. `<sub>` is restricted to the three known
   // subactions so we don't accidentally rewrite future siblings.
-  const pinRe = /(\buses:\s*danielroe\/uppt\/(?:pr|release|publish))@\S+(?:\s+#\s*v\S+)?/g
+  const pinRe = /(\buses:\s*danielroe\/uppt\/(?:pr|release|pack|publish))@\S+(?:\s+#\s*v\S+)?/g
   return readme.replace(pinRe, (_match, prefix: string) => `${prefix}@${sha} # ${tag}`)
 }
 

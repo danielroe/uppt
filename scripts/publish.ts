@@ -1,57 +1,46 @@
-// Stage-publish to npm using OIDC trusted publishing. The maintainer
-// approves the staged version with 2FA on npmjs.com afterwards.
+// Stage-publish prebuilt tarball(s) to npm using OIDC trusted
+// publishing. The maintainer approves the staged version with 2FA on
+// npmjs.com afterwards.
 //
-// Two paths, differing only in what gets staged:
-//   - pnpm-lock.yaml present: `pnpm pack` first so `catalog:` specifiers
-//     resolve in the tarball, then `npm stage publish ./<tarball>.tgz`.
-//   - otherwise: `npm stage publish` from source (no tarball arg).
+// The tarball(s) were produced by `uppt/pack` in an earlier job in the
+// same workflow run and downloaded into `TARBALL_DIR` by
+// `actions/download-artifact`.
+//
+// `npm publish <tarball>` doesn't run lifecycle scripts in any case
+// (the tarball is treated as an opaque artifact), but we still pass
+// `--ignore-scripts` for clarity.
 //
 // Env:
 //   NPM_ACCESS    `public` (default) or `restricted`
+//   TARBALL_DIR   directory holding the prebuilt `*.tgz` files
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, readdirSync } from 'node:fs'
 
-function run (cmd: string, args: string[]) {
-  console.log('$', cmd, ...args)
-  execFileSync(cmd, args, { stdio: 'inherit' })
+function run (cmd: string, args: string[], cwd: string) {
+  console.log('$', cmd, ...args, `(cwd: ${cwd})`)
+  execFileSync(cmd, args, { stdio: 'inherit', cwd })
 }
 
-function tarballGlobPrefix (pkgName: string): string {
-  // npm pack names tarballs `<name>-<version>.tgz` for unscoped packages
-  // and `<scope>-<name>-<version>.tgz` for scoped ones (the leading `@`
-  // is stripped and the `/` becomes `-`).
-  return pkgName.replace(/^@/, '').replace(/\//g, '-')
-}
-
-function findTarballs (prefix: string): string[] {
-  return readdirSync(process.cwd())
-    .filter(f => f.startsWith(`${prefix}-`) && f.endsWith('.tgz'))
-    .sort()
+function findTarballs (dir: string): string[] {
+  return readdirSync(dir).filter(f => f.endsWith('.tgz')).sort()
 }
 
 function main () {
   const access = process.env.NPM_ACCESS === 'restricted' ? 'restricted' : 'public'
-  const pkgPath = resolve(process.cwd(), 'package.json')
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { name: string }
-  const hasPnpmLock = existsSync(resolve(process.cwd(), 'pnpm-lock.yaml'))
 
-  if (!hasPnpmLock) {
-    run('npm', ['stage', 'publish', '--provenance', `--access=${access}`])
-    return
-  }
+  const dir = process.env.TARBALL_DIR
+  if (!dir) throw new Error('TARBALL_DIR is required')
+  if (!existsSync(dir)) throw new Error(`TARBALL_DIR does not exist: ${dir}`)
 
-  run('pnpm', ['pack', '--pack-destination', '.'])
-
-  const prefix = tarballGlobPrefix(pkg.name)
-  const tarballs = findTarballs(prefix)
+  const tarballs = findTarballs(dir)
   if (!tarballs.length) {
-    throw new Error(`No tarball matching ${prefix}-*.tgz found in ${process.cwd()}`)
+    throw new Error(`No *.tgz found in ${dir}. Did the pack job upload the artifact?`)
   }
+
   for (const tarball of tarballs) {
-    run('npm', ['stage', 'publish', `./${tarball}`, '--provenance', `--access=${access}`])
+    run('npm', ['stage', 'publish', `./${tarball}`, '--provenance', '--ignore-scripts', `--access=${access}`], dir)
   }
 }
 
