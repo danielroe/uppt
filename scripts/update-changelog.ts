@@ -16,7 +16,8 @@
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { Buffer } from 'node:buffer'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 interface Commit {
@@ -278,6 +279,80 @@ async function getContributors (
   return out
 }
 
+type ReleaseBranchState = 'missing' | 'at-base' | 'has-bump'
+
+async function getReleaseBranchState (
+  repo: { owner: string, repo: string },
+  opts: { base: string, branch: string },
+): Promise<ReleaseBranchState> {
+  let branchHead: string
+  try {
+    const data = await gh<{ commit: { sha: string } }>(
+      `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.branch)}`,
+    )
+    branchHead = data.commit.sha
+  } catch (err) {
+    if (err instanceof Error && /-> 404\b/.test(err.message)) return 'missing'
+    throw err
+  }
+
+  const baseInfo = await gh<{ commit: { sha: string } }>(
+    `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.base)}`,
+  )
+  return branchHead === baseInfo.commit.sha ? 'at-base' : 'has-bump'
+}
+
+async function getPackageJsonBlobSha (
+  repo: { owner: string, repo: string },
+  ref: string,
+): Promise<string> {
+  const file = await gh<{ sha: string }>(
+    `/repos/${repo.owner}/${repo.repo}/contents/package.json?ref=${encodeURIComponent(ref)}`,
+    { requireAuth: true },
+  )
+  return file.sha
+}
+
+async function createReleaseBranchWithBump (
+  repo: { owner: string, repo: string },
+  opts: { base: string, branch: string, message: string, contentBase64: string },
+): Promise<void> {
+  const baseInfo = await gh<{ commit: { sha: string } }>(
+    `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.base)}`,
+    { requireAuth: true },
+  )
+  const blobSha = await getPackageJsonBlobSha(repo, opts.base)
+
+  await gh(`/repos/${repo.owner}/${repo.repo}/git/refs`, {
+    method: 'POST',
+    requireAuth: true,
+    body: JSON.stringify({
+      ref: `refs/heads/${opts.branch}`,
+      sha: baseInfo.commit.sha,
+    }),
+  })
+
+  await commitBumpToExistingBranch(repo, { ...opts, blobSha })
+}
+
+async function commitBumpToExistingBranch (
+  repo: { owner: string, repo: string },
+  opts: { base: string, branch: string, message: string, contentBase64: string, blobSha?: string },
+): Promise<void> {
+  const blobSha = opts.blobSha ?? await getPackageJsonBlobSha(repo, opts.branch)
+
+  await gh(`/repos/${repo.owner}/${repo.repo}/contents/package.json`, {
+    method: 'PUT',
+    requireAuth: true,
+    body: JSON.stringify({
+      message: opts.message,
+      content: opts.contentBase64,
+      sha: blobSha,
+      branch: opts.branch,
+    }),
+  })
+}
+
 async function isReleaseMergeCommit (
   repo: { owner: string, repo: string },
   sha: string,
@@ -375,16 +450,36 @@ async function main () {
     }
   }
 
-  const remoteBranchExists = git('ls-remote', '--heads', 'origin', releaseBranch).length > 0
-  if (!remoteBranchExists && !dryRun) {
-    git('checkout', '-B', releaseBranch)
-    pkg.version = newVersion
-    writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
-    git('add', 'package.json')
-    git('-c', 'user.name=github-actions[bot]', '-c', 'user.email=41898282+github-actions[bot]@users.noreply.github.com',
-      'commit', '-m', `v${newVersion}`)
-    git('push', '-u', 'origin', releaseBranch)
-    git('checkout', baseBranch)
+
+  if (!dryRun) {
+    const state = await getReleaseBranchState(repo, {
+      base: baseBranch,
+      branch: releaseBranch,
+    })
+    if (state !== 'has-bump') {
+      if (!process.env.GITHUB_TOKEN) {
+        throw new Error('GITHUB_TOKEN is required to create the release branch')
+      }
+      pkg.version = newVersion
+      const nextPkg = JSON.stringify(pkg, null, 2) + '\n'
+      const contentBase64 = Buffer.from(nextPkg, 'utf8').toString('base64')
+      if (state === 'missing') {
+        await createReleaseBranchWithBump(repo, {
+          base: baseBranch,
+          branch: releaseBranch,
+          message: `v${newVersion}`,
+          contentBase64,
+        })
+      } else {
+        console.log(`Branch ${releaseBranch} exists at base HEAD with no bump; recovering by committing.`)
+        await commitBumpToExistingBranch(repo, {
+          base: baseBranch,
+          branch: releaseBranch,
+          message: `v${newVersion}`,
+          contentBase64,
+        })
+      }
+    }
   }
 
   const hasToken = Boolean(process.env.GITHUB_TOKEN)
