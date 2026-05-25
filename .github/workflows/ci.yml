@@ -35,8 +35,16 @@ jobs:
       - name: 💪 Test types
         run: pnpm test:types
 
-      # - name: 🧪 Test project
-      #   run: pnpm test:unit -- --coverage
+  zizmor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # SARIF upload to GitHub Advanced Security. GHAS is free on public repos
+      # once code scanning is enabled under Settings -> Code security.
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
-      # - name: 🟩 Coverage
-      #   uses: codecov/codecov-action@v5
+      - uses: zizmorcore/zizmor-action@5f14fd08f7cf1cb1609c1e344975f152c7ee938d # v0.5.6
