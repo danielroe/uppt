@@ -62,18 +62,32 @@ runs:
         COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
       run: |
         set -euo pipefail
-        if [ -f pnpm-lock.yaml ]; then
-          corepack enable
-          pnpm install --frozen-lockfile --ignore-scripts
-        elif [ -f yarn.lock ]; then
-          corepack enable
-          yarn install --immutable --mode=skip-build || yarn install --frozen-lockfile --ignore-scripts
-        elif [ -f package-lock.json ]; then
-          npm ci --ignore-scripts
-        else
-          echo "::error::danielroe/uppt/pack found no lockfile (pnpm-lock.yaml, yarn.lock, or package-lock.json). Refusing to install from unpinned dependencies. Commit a lockfile, or pass 'install: false' and install dependencies yourself before this step runs."
-          exit 1
+        pm=$(node -e 'try { const p = require("./package.json").packageManager || ""; const m = p.match(/^(pnpm|yarn|npm)@/); process.stdout.write(m ? m[1] : "") } catch { process.stdout.write("") }')
+        if [ -z "$pm" ]; then
+          if [ -f pnpm-lock.yaml ]; then pm=pnpm
+          elif [ -f yarn.lock ]; then pm=yarn
+          elif [ -f package-lock.json ]; then pm=npm
+          else
+            echo "::error::danielroe/uppt/pack found no \`packageManager\` field in package.json and no lockfile (pnpm-lock.yaml, yarn.lock, or package-lock.json). Refusing to install from unpinned dependencies. Set \`packageManager\` and commit a lockfile, or pass \`install: false\` and install dependencies yourself before this step runs."
+            exit 1
+          fi
         fi
+        case "$pm" in
+          pnpm)
+            [ -f pnpm-lock.yaml ] || { echo "::error::\`packageManager\` declares pnpm but pnpm-lock.yaml is missing."; exit 1; }
+            corepack enable
+            pnpm install --frozen-lockfile --ignore-scripts
+            ;;
+          yarn)
+            [ -f yarn.lock ] || { echo "::error::\`packageManager\` declares yarn but yarn.lock is missing."; exit 1; }
+            corepack enable
+            yarn install --immutable --mode=skip-build || yarn install --frozen-lockfile --ignore-scripts
+            ;;
+          npm)
+            [ -f package-lock.json ] || { echo "::error::\`packageManager\` declares npm but package-lock.json is missing."; exit 1; }
+            npm ci --ignore-scripts
+            ;;
+        esac
 
     - name: Pack tarball(s)
       shell: bash
