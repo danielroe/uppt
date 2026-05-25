@@ -8,20 +8,29 @@ on:
     branches:
       - main
 
+permissions: {}
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
       - run: corepack enable
+        env:
+          COREPACK_ENABLE_STRICT: '1'
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: lts/*
           cache: pnpm
 
       - name: 📦 Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: 💪 Test types
         run: pnpm test:types
