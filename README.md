@@ -21,7 +21,7 @@ The aim of **uppt** is to make a very simple, secure release workflow for mainta
 ![a screenshot of npmjs.com](https://raw.githubusercontent.com/danielroe/uppt/main/assets/trusted-publisher.png)
 
 2. Create a [GitHub environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments) named `npm`. You can scope it to `v*` tags, and configure any restrictions on it (such as requiring approvals if you want).
-   ![a screenshot of github environment configuration settings](https://raw.githubusercontent.com/danielroe/uppt/main/assets/trusted-publisher.png)
+   ![a screenshot of github environment configuration settings](https://raw.githubusercontent.com/danielroe/uppt/main/assets/github-environments.png)
 
 **3.** Allow GitHub Actions to create pull requests on your repo: under **Settings → Actions → General → Workflow permissions** (`https://github.com/<user>/<repo>/settings/actions`), check **Allow GitHub Actions to create and approve pull requests**. Without this, `uppt/pr` fails with `403 Forbidden: GitHub Actions is not permitted to create or approve pull requests` when opening the release PR.
 
