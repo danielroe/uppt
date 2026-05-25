@@ -52,6 +52,7 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
         registry-url: 'https://registry.npmjs.org'
+        package-manager-cache: false
 
     - name: Update npm
       shell: bash
