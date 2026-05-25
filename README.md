@@ -147,8 +147,9 @@ This subaction installs the package's dependencies, runs `pnpm pack` (if you hav
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `node-version` | `24` | Node version for the scripts. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). |
+| `node-version` | `24` | Node version for the scripts. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). Ignored when `install` is `false`. |
 | `checkout` | `true` | Set to `false` if the caller has already checked out the tag ref. |
+| `install` | `true` | Set to `false` to handle `actions/setup-node` and dependency installation yourself. Useful when you want a pinned package manager version, a cached `node_modules`, or a hardened install policy. When `false`, the caller must put `node`, `npm`, and any package manager on PATH before `uppt/pack` runs. |
 
 ### Stages a publish (`danielroe/uppt/publish`)
 
