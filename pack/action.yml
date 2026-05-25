@@ -71,7 +71,8 @@ runs:
         elif [ -f package-lock.json ]; then
           npm ci --ignore-scripts
         else
-          npm install --ignore-scripts --no-package-lock
+          echo "::error::danielroe/uppt/pack found no lockfile (pnpm-lock.yaml, yarn.lock, or package-lock.json). Refusing to install from unpinned dependencies. Commit a lockfile, or pass 'install: false' and install dependencies yourself before this step runs."
+          exit 1
         fi
 
     - name: Pack tarball(s)
