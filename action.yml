@@ -12,10 +12,11 @@ runs:
     - shell: bash
       run: |
         cat <<'EOF' >&2
-        ::error::danielroe/uppt is split into three subactions. Pick one:
+        ::error::danielroe/uppt is split into four subactions. Pick one:
           - danielroe/uppt/pr@<ref>       (push to default branch)
           - danielroe/uppt/release@<ref>  (pull_request: closed, release/v* head ref)
-          - danielroe/uppt/publish@<ref>  (push or workflow_dispatch on a v* tag)
+          - danielroe/uppt/pack@<ref>     (workflow_dispatch on a v* tag; uploads tarball as release asset)
+          - danielroe/uppt/publish@<ref>  (workflow_dispatch on a v* tag; runs npm stage publish)
         See https://github.com/danielroe/uppt#getting-started for the full workflow.
         EOF
         exit 1

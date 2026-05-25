@@ -1,0 +1,104 @@
+name: 'uppt/pack'
+description: 'Pack the current tag into a tarball and upload it as a workflow artifact for the publish job to consume.'
+author: 'Daniel Roe'
+
+branding:
+  icon: 'archive'
+  color: 'black'
+
+inputs:
+  node-version:
+    description: 'Node version for the scripts. Needs `--experimental-strip-types` support (22.6+, 24+ recommended).'
+    required: false
+    default: '24'
+  checkout:
+    description: 'Whether the action should run `actions/checkout` itself. Set to `false` if the caller has already checked out the tag ref.'
+    required: false
+    default: 'true'
+  install:
+    description: 'Whether the action should install the package''s dependencies itself. Set to `false` if the caller has already installed (e.g. with a pinned package manager version, a cached `node_modules`, or a hardened install policy). When `false`, the action will not run `actions/setup-node` either; the caller is responsible for putting `node`, `npm`, and any package manager on PATH before `uppt/pack` runs.'
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Validate event
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+      run: |
+        set -euo pipefail
+        case "$EVENT_NAME" in
+          push|workflow_dispatch) ;;
+          *)
+            echo "::error::danielroe/uppt/pack only supports 'push' and 'workflow_dispatch' events, got '$EVENT_NAME'."
+            exit 1
+            ;;
+        esac
+        if [ "${GITHUB_REF:-}" = "${GITHUB_REF#refs/tags/v}" ]; then
+          echo "::error::danielroe/uppt/pack expected a 'refs/tags/v*' ref, got '${GITHUB_REF:-<unset>}'."
+          exit 1
+        fi
+
+    - name: Checkout
+      if: inputs.checkout == 'true'
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+
+    - name: Setup Node
+      if: inputs.install == 'true'
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        package-manager-cache: false
+
+    - name: Install dependencies
+      if: inputs.install == 'true'
+      shell: bash
+      env:
+        COREPACK_ENABLE_STRICT: '1'
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+      run: |
+        set -euo pipefail
+        pm=$(node -e 'try { const p = require("./package.json").packageManager || ""; const m = p.match(/^(pnpm|yarn|npm)@/); process.stdout.write(m ? m[1] : "") } catch { process.stdout.write("") }')
+        if [ -z "$pm" ]; then
+          if [ -f pnpm-lock.yaml ]; then pm=pnpm
+          elif [ -f yarn.lock ]; then pm=yarn
+          elif [ -f package-lock.json ]; then pm=npm
+          else
+            echo "::error::danielroe/uppt/pack found no \`packageManager\` field in package.json and no lockfile (pnpm-lock.yaml, yarn.lock, or package-lock.json). Refusing to install from unpinned dependencies. Set \`packageManager\` and commit a lockfile, or pass \`install: false\` and install dependencies yourself before this step runs."
+            exit 1
+          fi
+        fi
+        case "$pm" in
+          pnpm)
+            [ -f pnpm-lock.yaml ] || { echo "::error::\`packageManager\` declares pnpm but pnpm-lock.yaml is missing."; exit 1; }
+            corepack enable
+            pnpm install --frozen-lockfile --ignore-scripts
+            ;;
+          yarn)
+            [ -f yarn.lock ] || { echo "::error::\`packageManager\` declares yarn but yarn.lock is missing."; exit 1; }
+            corepack enable
+            yarn install --immutable --mode=skip-build || yarn install --frozen-lockfile --ignore-scripts
+            ;;
+          npm)
+            [ -f package-lock.json ] || { echo "::error::\`packageManager\` declares npm but package-lock.json is missing."; exit 1; }
+            npm ci --ignore-scripts
+            ;;
+        esac
+
+    - name: Pack tarball(s)
+      shell: bash
+      env:
+        PACK_OUT_DIR: ${{ runner.temp }}/uppt-pack
+      run: node --experimental-strip-types ${{ github.action_path }}/../scripts/pack.ts
+
+    - name: Upload tarball artifact
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: uppt-tarball
+        path: ${{ runner.temp }}/uppt-pack/*.tgz
+        if-no-files-found: error
+        retention-days: 1

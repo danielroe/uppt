@@ -79,16 +79,32 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   # The chained dispatch from `release` lands here as a `workflow_dispatch`
-  # event on a `vX.Y.Z` tag ref. Manual recovery uses the same path
+  # event on a `vX.Y.Z` tag ref. The `pack` job installs deps, runs
+  # `pnpm pack` (or `npm pack`), and uploads the tarball as a workflow
+  # artifact. Lifecycle scripts (`prepack`, `prepare`, `postpack`) run
+  # here, in a job with `permissions: {}` and no `npm` environment.
+  # Manual recovery uses the same path.
   # (Run workflow -> pick a `v*` tag).
+  pack:
+    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pack-${{ github.ref }}
+      cancel-in-progress: false
+    permissions: {}
+    steps:
+      - uses: danielroe/uppt/pack@8da0597c0c549fdfd95a9868df95feb6d04dab26 # v0.4.0
+
+  # `publish` downloads the prebuilt tarball from the pack job's
+  # artifact and stages it for publish.
   publish:
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
+    needs: pack
     runs-on: ubuntu-latest
     concurrency:
       group: publish-${{ github.ref }}
       cancel-in-progress: false
     permissions:
-      contents: read        # checkout the tag
       id-token: write       # OIDC claim for npm trusted publisher
     environment: npm        # must match the trusted-publisher entry on npmjs.com
     steps:
@@ -125,15 +141,27 @@ When you merge a release PR, this subaction tags that commit, creates a GitHub R
 | `publish-workflow` | `release.yml` | Workflow filename to dispatch after tagging. Must declare `workflow_dispatch`. |
 | `checkout` | `true` | Set to `false` if the caller has already checked out `github.event.pull_request.merge_commit_sha`. |
 
+### Packs a tarball (`danielroe/uppt/pack`)
+
+This subaction installs the package's dependencies, runs `pnpm pack` (if you have a `pnpm-lock.yaml`) or `npm pack`, and uploads each resulting `.tgz` as a workflow artifact for the `publish` job to consume.
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `node-version` | `24` | Node version for the scripts. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). Ignored when `install` is `false`. |
+| `checkout` | `true` | Set to `false` if the caller has already checked out the tag ref. |
+| `install` | `true` | Set to `false` to handle `actions/setup-node` and dependency installation yourself. Useful when you want a pinned package manager version, a cached `node_modules`, or a hardened install policy. When `false`, the caller must put `node`, `npm`, and any package manager on PATH before `uppt/pack` runs. |
+
 ### Stages a publish (`danielroe/uppt/publish`)
 
-This subaction runs `pnpm pack` (if you have a `pnpm-lock.yaml`) and then runs `npm stage publish` with OIDC authentication. The staged version then needs to be approved by a maintainer with 2FA on npmjs.com before it goes live.
+This subaction downloads the tarball uploaded by `uppt/pack` in the same workflow run and runs `npm stage publish ./<tarball>.tgz` with OIDC authentication. The staged version then needs to be approved by a maintainer with 2FA on npmjs.com before it goes live.
+
+> [!IMPORTANT]
+> `prepublishOnly` is **not** invoked: `uppt/publish` publishes the prebuilt tarball with `--ignore-scripts`. Move any logic you previously had in `prepublishOnly` into `prepack` so it runs during `uppt/pack` and the output lands in the tarball.
 
 | Input | Default | Description |
 | --- | --- | --- |
 | `node-version` | `24` | Node version for the scripts and for `npm stage publish`. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). |
 | `npm-access` | `public` | npm access level (`public` or `restricted`). |
-| `checkout` | `true` | Set to `false` if the caller has already checked out the tag ref. |
 
 ## Prerequisites
 

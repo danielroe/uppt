@@ -33,7 +33,7 @@ Out of scope:
 
 These are deliberate trade-offs, documented here so they're not surprises:
 
-- **`uppt/publish` runs the caller's lifecycle scripts in the same job that holds the npm OIDC token.** `pnpm install` and `npm ci` run with `--ignore-scripts`, but `pnpm pack` (used when a `pnpm-lock.yaml` is present) executes the package's own `prepack`/`prepare`/`prepublishOnly` scripts. A compromised script in the caller's own package will run with the npm OIDC token in scope. uppt does not sandbox lifecycle scripts.
+- **Lifecycle scripts run during pack, not during publish.** `uppt/pack` installs deps and runs `pnpm pack` (or `npm pack`) in a job that the recommended workflow runs with `permissions: {}`. `pnpm install` and `npm ci` themselves use `--ignore-scripts`, but `pnpm pack` and `npm pack` execute the package's own `prepack`/`prepare`/`postpack` scripts (this is where most packages run their TypeScript or bundler build, so disabling them is not a viable default). uppt does not sandbox lifecycle scripts.
 
 ## Coordinated disclosure
 
