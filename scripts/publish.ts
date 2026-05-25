@@ -17,10 +17,11 @@
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
+import { resolve } from 'node:path'
 
-function run (cmd: string, args: string[], cwd: string) {
-  console.log('$', cmd, ...args, `(cwd: ${cwd})`)
-  execFileSync(cmd, args, { stdio: 'inherit', cwd })
+function run (cmd: string, args: string[]) {
+  console.log('$', cmd, ...args)
+  execFileSync(cmd, args, { stdio: 'inherit' })
 }
 
 function findTarballs (dir: string): string[] {
@@ -40,7 +41,8 @@ function main () {
   }
 
   for (const tarball of tarballs) {
-    run('npm', ['stage', 'publish', `./${tarball}`, '--provenance', '--ignore-scripts', `--access=${access}`], dir)
+    const tarballPath = resolve(dir, tarball)
+    run('npm', ['stage', 'publish', tarballPath, '--provenance', '--ignore-scripts', `--access=${access}`])
   }
 }
 
