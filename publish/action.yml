@@ -15,6 +15,10 @@ inputs:
     description: 'npm access level (`public` or `restricted`).'
     required: false
     default: 'public'
+  files:
+    description: 'Optional JSON array of tarball filenames to publish, as emitted by `uppt/pack`''s `files` output. When omitted, the action publishes every `*.tgz` it finds in the downloaded artifact.'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -59,4 +63,5 @@ runs:
       env:
         NPM_ACCESS: ${{ inputs.npm-access }}
         TARBALL_DIR: ${{ runner.temp }}/uppt-tarballs
+        TARBALL_FILES: ${{ inputs.files }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/publish.ts

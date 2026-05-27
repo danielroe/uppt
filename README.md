@@ -92,13 +92,19 @@ jobs:
       group: pack-${{ github.ref }}
       cancel-in-progress: false
     permissions: {}
+    outputs:
+      files: ${{ steps.pack.outputs.files }}
     steps:
-      - uses: danielroe/uppt/pack@fc0f1c61b54a79c6a354c8f9dbe821bc10a98893 # v0.5.0
+      - id: pack
+        uses: danielroe/uppt/pack@fc0f1c61b54a79c6a354c8f9dbe821bc10a98893 # v0.5.0
 
   # `publish` downloads the prebuilt tarball from the pack job's
   # artifact and stages it for publish.
   publish:
-    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
+    if: |
+      github.event_name == 'workflow_dispatch'
+      && startsWith(github.ref, 'refs/tags/v')
+      && needs.pack.outputs.files != '[]'
     needs: pack
     runs-on: ubuntu-latest
     concurrency:
@@ -109,6 +115,8 @@ jobs:
     environment: npm        # must match the trusted-publisher entry on npmjs.com
     steps:
       - uses: danielroe/uppt/publish@fc0f1c61b54a79c6a354c8f9dbe821bc10a98893 # v0.5.0
+        with:
+          files: ${{ needs.pack.outputs.files }}
 ```
 
 > [!IMPORTANT]
@@ -143,13 +151,17 @@ When you merge a release PR, this subaction tags that commit, creates a GitHub R
 
 ### Packs a tarball (`danielroe/uppt/pack`)
 
-This subaction installs the package's dependencies, runs `pnpm pack` (if you have a `pnpm-lock.yaml`) or `npm pack`, and uploads each resulting `.tgz` as a workflow artifact for the `publish` job to consume.
+This subaction installs the package's dependencies, runs `pnpm pack --json` (if you have a `pnpm-lock.yaml`) or `npm pack --json`, and uploads each resulting `.tgz` as a workflow artifact for the `publish` job to consume. It exposes a `files` output (a JSON array of the produced tarball filenames) so the publish job can iterate them without re-scanning the artifact.
 
 | Input | Default | Description |
 | --- | --- | --- |
 | `node-version` | `24` | Node version for the scripts. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). Ignored when `install` is `false`. |
 | `checkout` | `true` | Set to `false` if the caller has already checked out the tag ref. |
 | `install` | `true` | Set to `false` to handle `actions/setup-node` and dependency installation yourself. Useful when you want a pinned package manager version, a cached `node_modules`, or a hardened install policy. When `false`, the caller must put `node`, `npm`, and any package manager on PATH before `uppt/pack` runs. |
+
+| Output | Description |
+| --- | --- |
+| `files` | JSON array of tarball filenames produced by `npm pack` / `pnpm pack` (e.g. `["my-pkg-1.2.3.tgz"]`). Pass through to `uppt/publish` via its `files` input. |
 
 ### Stages a publish (`danielroe/uppt/publish`)
 
@@ -162,6 +174,7 @@ This subaction downloads the tarball uploaded by `uppt/pack` in the same workflo
 | --- | --- | --- |
 | `node-version` | `24` | Node version for the scripts and for `npm stage publish`. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). |
 | `npm-access` | `public` | npm access level (`public` or `restricted`). |
+| `files` | _(scan artifact)_ | Optional JSON array of tarball filenames to publish, as emitted by `uppt/pack`'s `files` output. When omitted, every `*.tgz` in the downloaded artifact is published. |
 
 ## Prerequisites
 
