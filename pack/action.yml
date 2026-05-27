@@ -20,6 +20,11 @@ inputs:
     required: false
     default: 'true'
 
+outputs:
+  files:
+    description: 'JSON array of tarball filenames (within the uploaded artifact) produced by `npm pack` / `pnpm pack`. Pass through to `uppt/publish` via its `files` input to skip the artifact-directory scan.'
+    value: ${{ steps.pack.outputs.files }}
+
 runs:
   using: composite
   steps:
@@ -90,6 +95,7 @@ runs:
         esac
 
     - name: Pack tarball(s)
+      id: pack
       shell: bash
       env:
         PACK_OUT_DIR: ${{ runner.temp }}/uppt-pack

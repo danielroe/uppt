@@ -13,29 +13,46 @@
 //   PACK_OUT_DIR     directory to write the `*.tgz` into (created if
 //                    missing). The action then uploads its contents as
 //                    a workflow artifact.
+//   GITHUB_OUTPUT    set by the runner; receives `files=<json array>`.
 //   GITHUB_REF       must be `refs/tags/v*` (set automatically)
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
+import { basename, resolve } from 'node:path'
 
-function run (cmd: string, args: string[], cwd?: string) {
-  console.log('$', cmd, ...args, cwd ? `(cwd: ${cwd})` : '')
-  execFileSync(cmd, args, { stdio: 'inherit', cwd })
+function runCapture (cmd: string, args: string[]): string {
+  console.log('$', cmd, ...args)
+  return execFileSync(cmd, args, {
+    stdio: ['ignore', 'pipe', 'inherit'],
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  })
 }
 
-function tarballGlobPrefix (pkgName: string): string {
-  // npm/pnpm pack names tarballs `<name>-<version>.tgz` for unscoped
-  // packages and `<scope>-<name>-<version>.tgz` for scoped ones (the
-  // leading `@` is stripped and the `/` becomes `-`).
-  return pkgName.replace(/^@/, '').replace(/\//g, '-')
-}
-
-function findTarballs (dir: string, prefix: string): string[] {
-  return readdirSync(dir)
-    .filter(f => f.startsWith(`${prefix}-`) && f.endsWith('.tgz'))
-    .sort()
+// `npm pack --json` emits an array of pack records with a bare
+// `filename`; `pnpm pack --json` emits a single object whose
+// `filename` is an absolute path. Normalise both to basenames so the
+// step output matches what `actions/upload-artifact` puts in the
+// artifact (and what `publish.ts` resolves under `TARBALL_DIR`).
+function parseFilenames (stdout: string): string[] {
+  const data = JSON.parse(stdout) as unknown
+  const records = Array.isArray(data) ? data : [data]
+  const filenames: string[] = []
+  for (const entry of records) {
+    if (!entry || typeof entry !== 'object' || !('filename' in entry)) {
+      throw new Error(`Unexpected pack JSON entry without 'filename': ${JSON.stringify(entry)}`)
+    }
+    const filename = (entry as { filename: unknown }).filename
+    if (typeof filename !== 'string' || !filename.endsWith('.tgz')) {
+      throw new Error(`Unexpected pack JSON 'filename': ${JSON.stringify(filename)}`)
+    }
+    filenames.push(basename(filename))
+  }
+  if (!filenames.length) {
+    throw new Error('Pack tool produced JSON with no tarball filenames')
+  }
+  return filenames
 }
 
 function main () {
@@ -52,25 +69,29 @@ function main () {
   if (!outDir) throw new Error('PACK_OUT_DIR is required')
   mkdirSync(outDir, { recursive: true })
 
-  const pkgPath = resolve(process.cwd(), 'package.json')
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { name: string }
   const hasPnpmLock = existsSync(resolve(process.cwd(), 'pnpm-lock.yaml'))
 
+  let stdout: string
   if (hasPnpmLock) {
-    run('pnpm', ['pack', '--pack-destination', outDir])
+    stdout = runCapture('pnpm', ['pack', '--pack-destination', outDir, '--json'])
   } else {
-    run('npm', ['pack', '--pack-destination', outDir])
+    stdout = runCapture('npm', ['pack', '--pack-destination', outDir, '--json', '--silent'])
   }
 
-  const prefix = tarballGlobPrefix(pkg.name)
-  const tarballs = findTarballs(outDir, prefix)
-  if (!tarballs.length) {
-    throw new Error(`No tarball matching ${prefix}-*.tgz found in ${outDir} after pack`)
+  const filenames = parseFilenames(stdout)
+
+  for (const filename of filenames) {
+    const tarballPath = resolve(outDir, filename)
+    if (!existsSync(tarballPath)) {
+      throw new Error(`Pack tool reported '${filename}' but it is not present in ${outDir}`)
+    }
+    const size = statSync(tarballPath).size
+    console.log(`Packed ${filename} (${size} bytes) for ${tag}`)
   }
 
-  for (const tarball of tarballs) {
-    const size = statSync(resolve(outDir, tarball)).size
-    console.log(`Packed ${tarball} (${size} bytes) for ${tag}`)
+  const githubOutput = process.env.GITHUB_OUTPUT
+  if (githubOutput) {
+    appendFileSync(githubOutput, `files=${JSON.stringify(filenames)}\n`)
   }
 }
 
