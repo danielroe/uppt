@@ -115,54 +115,37 @@ export function resolveWorkspaces (rootDir: string, packagesInput: string): Work
 }
 
 /**
- * Resolve the current lockstep version for the repo. We try, in order:
+ * Resolve the current lockstep version for a monorepo from its
+ * workspaces. Workspaces are the source of truth: if they all agree on
+ * a single semver version, that's the lockstep version. Anything else
+ * is an error.
  *
- *   1. The version implied by the latest semver-shaped tag, if one was
- *      passed in. Tags are the source of truth for "what is published".
- *   2. The root `package.json#version`, if it exists and is semver. This
- *      covers single-package repos where the private root carries the
- *      canonical version.
- *   3. The single version shared by every declared workspace, if they
- *      all agree.
- *
- * Throws when workspaces disagree on version, because that almost
- * always means a half-finished manual bump, and silently picking one
- * would produce a wrong release.
+ * The root `package.json#version` and the latest tag are deliberately
+ * *not* consulted here. The root may legitimately be at `0.0.0` or
+ * have no version at all; the tag may have drifted from the workspaces
+ * via a manual publish. Trusting either over the workspaces produces
+ * surprising releases.
  */
-export function resolveCurrentLockstepVersion (
-  rootDir: string,
-  latestTagName: string | null,
-  workspaces: Workspace[],
-): string {
-  if (latestTagName) {
-    const fromTag = latestTagName.replace(/^v/, '')
-    if (isSemver(fromTag)) return fromTag
-  }
-
-  const rootPkgPath = resolve(rootDir, 'package.json')
-  if (existsSync(rootPkgPath)) {
-    const rootPkg = JSON.parse(readFileSync(rootPkgPath, 'utf8')) as { version?: string }
-    if (typeof rootPkg.version === 'string' && isSemver(rootPkg.version)) {
-      return rootPkg.version
-    }
-  }
-
-  const versioned = workspaces.filter(ws => ws.version !== null)
-  if (versioned.length) {
-    const versions = new Set(versioned.map(ws => ws.version!))
-    if (versions.size === 1) return [...versions][0]!
-    const detail = versioned
-      .map(ws => `  - ${ws.name}: ${ws.version}`)
-      .join('\n')
+export function lockstepVersionFromWorkspaces (workspaces: Workspace[]): string {
+  const allVersions = workspaces.map(ws => ws.version)
+  if (allVersions.every(v => v === null)) {
     throw new Error(
-      'Cannot determine current lockstep version: workspaces disagree.\n'
-      + 'Reconcile them to a single version (or set a `version` on the root package.json) before releasing.\n'
-      + detail,
+      'No listed workspace has a `version` field. Lockstep releases need every workspace to share a single semver version.',
     )
   }
 
+  const distinct = new Set(allVersions.map(v => (v !== null && isSemver(v)) ? v : null))
+  if (distinct.size === 1 && !distinct.has(null)) {
+    return [...distinct][0]!
+  }
+
+  const detail = workspaces
+    .map(ws => `  - ${ws.name}: ${ws.version ?? '<missing>'}`)
+    .join('\n')
   throw new Error(
-    'Cannot determine current lockstep version: no tag, no root version, no workspace with a version.',
+    'Workspaces do not agree on a single version. uppt currently supports lockstep releases only: '
+    + 'every listed package must share the same semver version. Reconcile them before releasing.\n'
+    + detail,
   )
 }
 

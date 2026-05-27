@@ -6,8 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   expandPackagePatterns,
   isSemver,
+  lockstepVersionFromWorkspaces,
   parsePackagesInput,
-  resolveCurrentLockstepVersion,
   resolveWorkspaces,
 } from '../scripts/_workspaces.ts'
 
@@ -139,42 +139,46 @@ describe('resolveWorkspaces', () => {
   })
 })
 
-describe('resolveCurrentLockstepVersion', () => {
-  it('prefers the latest tag', () => {
-    writePackage('.', { name: 'root', version: '0.5.0', private: true })
-    writePackage('packages/a', { name: 'a', version: '0.4.0' })
-    const workspaces = resolveWorkspaces(tmp, 'packages/a')
-    expect(resolveCurrentLockstepVersion(tmp, 'v1.2.3', workspaces)).toBe('1.2.3')
-  })
-
-  it('falls back to root version when no tag', () => {
-    writePackage('.', { name: 'root', version: '0.5.0', private: true })
-    writePackage('packages/a', { name: 'a', version: '0.4.0' })
-    const workspaces = resolveWorkspaces(tmp, 'packages/a')
-    expect(resolveCurrentLockstepVersion(tmp, null, workspaces)).toBe('0.5.0')
-  })
-
-  it('falls back to consensus across workspaces when root has no version', () => {
-    writePackage('.', { name: 'root', private: true })
-    writePackage('packages/a', { name: 'a', version: '0.4.0' })
-    writePackage('packages/b', { name: 'b', version: '0.4.0' })
+describe('lockstepVersionFromWorkspaces', () => {
+  it('returns the shared version when all workspaces agree', () => {
+    writePackage('packages/a', { name: 'a', version: '1.2.3' })
+    writePackage('packages/b', { name: 'b', version: '1.2.3' })
     const workspaces = resolveWorkspaces(tmp, 'packages/*')
-    expect(resolveCurrentLockstepVersion(tmp, null, workspaces)).toBe('0.4.0')
+    expect(lockstepVersionFromWorkspaces(workspaces)).toBe('1.2.3')
   })
 
-  it('throws when workspaces disagree and no tag/root version anchors them', () => {
-    writePackage('.', { name: 'root', private: true })
-    writePackage('packages/a', { name: 'a', version: '0.4.0' })
-    writePackage('packages/b', { name: 'b', version: '0.5.0' })
+  it('ignores the root package.json entirely', () => {
+    writePackage('.', { name: 'root', version: '9.9.9', private: true })
+    writePackage('packages/a', { name: 'a', version: '1.2.3' })
+    const workspaces = resolveWorkspaces(tmp, 'packages/a')
+    expect(lockstepVersionFromWorkspaces(workspaces)).toBe('1.2.3')
+  })
+
+  it('throws when workspaces disagree', () => {
+    writePackage('packages/a', { name: 'a', version: '1.2.3' })
+    writePackage('packages/b', { name: 'b', version: '1.2.4' })
     const workspaces = resolveWorkspaces(tmp, 'packages/*')
-    expect(() => resolveCurrentLockstepVersion(tmp, null, workspaces)).toThrowError(/workspaces disagree/)
+    expect(() => lockstepVersionFromWorkspaces(workspaces)).toThrowError(/do not agree on a single version/)
   })
 
-  it('throws when nothing carries a version', () => {
-    writePackage('.', { name: 'root', private: true })
+  it('throws when no workspace has a semver version', () => {
     writePackage('packages/a', { name: 'a' })
     const workspaces = resolveWorkspaces(tmp, 'packages/a')
-    expect(() => resolveCurrentLockstepVersion(tmp, null, workspaces)).toThrowError(/no tag, no root version/)
+    expect(() => lockstepVersionFromWorkspaces(workspaces)).toThrowError(/No listed workspace has a `version` field/)
+  })
+
+  it('throws when one workspace is missing a version', () => {
+    writePackage('packages/a', { name: 'a', version: '1.2.3' })
+    writePackage('packages/b', { name: 'b' })
+    const workspaces = resolveWorkspaces(tmp, 'packages/*')
+    expect(() => lockstepVersionFromWorkspaces(workspaces)).toThrowError(/do not agree on a single version/)
+  })
+
+  it('throws when a workspace carries a non-semver version string', () => {
+    writePackage('packages/a', { name: 'a', version: '1.2.3' })
+    writePackage('packages/b', { name: 'b', version: 'next' })
+    const workspaces = resolveWorkspaces(tmp, 'packages/*')
+    expect(() => lockstepVersionFromWorkspaces(workspaces)).toThrowError(/do not agree on a single version/)
   })
 })
 
