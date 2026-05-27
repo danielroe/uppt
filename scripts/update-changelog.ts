@@ -302,54 +302,106 @@ async function getReleaseBranchState (
   return branchHead === baseInfo.commit.sha ? 'at-base' : 'has-bump'
 }
 
-async function getPackageJsonBlobSha (
-  repo: { owner: string, repo: string },
-  ref: string,
-): Promise<string> {
-  const file = await gh<{ sha: string }>(
-    `/repos/${repo.owner}/${repo.repo}/contents/package.json?ref=${encodeURIComponent(ref)}`,
-    { requireAuth: true },
-  )
-  return file.sha
+interface FileToCommit {
+  /** Path relative to the repo root, using forward slashes. */
+  path: string
+  /** Raw UTF-8 contents to write at that path. */
+  content: string
 }
 
-async function createReleaseBranchWithBump (
+/**
+ * Land one atomic commit on `opts.branch` containing every file in
+ * `opts.files`, using the Git Data API. Creates the branch at `opts.base`
+ * if it doesn't exist yet. The resulting commit has the branch's current
+ * tip as its sole parent (or `opts.base`'s tip, if the branch was just
+ * created), so the ref fast-forwards.
+ */
+async function commitFilesToBranch (
   repo: { owner: string, repo: string },
-  opts: { base: string, branch: string, message: string, contentBase64: string },
+  opts: { base: string, branch: string, message: string, files: FileToCommit[] },
 ): Promise<void> {
-  const baseInfo = await gh<{ commit: { sha: string } }>(
-    `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.base)}`,
+  if (!opts.files.length) {
+    throw new Error('commitFilesToBranch: refusing to commit with no files')
+  }
+
+  let parentSha: string
+  try {
+    const branchInfo = await gh<{ commit: { sha: string } }>(
+      `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.branch)}`,
+      { requireAuth: true },
+    )
+    parentSha = branchInfo.commit.sha
+  } catch (err) {
+    if (!(err instanceof Error) || !/-> 404\b/.test(err.message)) throw err
+    const baseInfo = await gh<{ commit: { sha: string } }>(
+      `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.base)}`,
+      { requireAuth: true },
+    )
+    await gh(`/repos/${repo.owner}/${repo.repo}/git/refs`, {
+      method: 'POST',
+      requireAuth: true,
+      body: JSON.stringify({
+        ref: `refs/heads/${opts.branch}`,
+        sha: baseInfo.commit.sha,
+      }),
+    })
+    parentSha = baseInfo.commit.sha
+  }
+
+  const parentCommit = await gh<{ tree: { sha: string } }>(
+    `/repos/${repo.owner}/${repo.repo}/git/commits/${parentSha}`,
     { requireAuth: true },
   )
-  const blobSha = await getPackageJsonBlobSha(repo, opts.base)
 
-  await gh(`/repos/${repo.owner}/${repo.repo}/git/refs`, {
-    method: 'POST',
+  const blobs = await Promise.all(opts.files.map(async (file) => {
+    const blob = await gh<{ sha: string }>(
+      `/repos/${repo.owner}/${repo.repo}/git/blobs`,
+      {
+        method: 'POST',
+        requireAuth: true,
+        body: JSON.stringify({
+          content: Buffer.from(file.content, 'utf8').toString('base64'),
+          encoding: 'base64',
+        }),
+      },
+    )
+    return { path: file.path, sha: blob.sha }
+  }))
+
+  const tree = await gh<{ sha: string }>(
+    `/repos/${repo.owner}/${repo.repo}/git/trees`,
+    {
+      method: 'POST',
+      requireAuth: true,
+      body: JSON.stringify({
+        base_tree: parentCommit.tree.sha,
+        tree: blobs.map(b => ({
+          path: b.path,
+          mode: '100644',
+          type: 'blob',
+          sha: b.sha,
+        })),
+      }),
+    },
+  )
+
+  const commit = await gh<{ sha: string }>(
+    `/repos/${repo.owner}/${repo.repo}/git/commits`,
+    {
+      method: 'POST',
+      requireAuth: true,
+      body: JSON.stringify({
+        message: opts.message,
+        tree: tree.sha,
+        parents: [parentSha],
+      }),
+    },
+  )
+
+  await gh(`/repos/${repo.owner}/${repo.repo}/git/refs/heads/${opts.branch}`, {
+    method: 'PATCH',
     requireAuth: true,
-    body: JSON.stringify({
-      ref: `refs/heads/${opts.branch}`,
-      sha: baseInfo.commit.sha,
-    }),
-  })
-
-  await commitBumpToExistingBranch(repo, { ...opts, blobSha })
-}
-
-async function commitBumpToExistingBranch (
-  repo: { owner: string, repo: string },
-  opts: { base: string, branch: string, message: string, contentBase64: string, blobSha?: string },
-): Promise<void> {
-  const blobSha = opts.blobSha ?? await getPackageJsonBlobSha(repo, opts.branch)
-
-  await gh(`/repos/${repo.owner}/${repo.repo}/contents/package.json`, {
-    method: 'PUT',
-    requireAuth: true,
-    body: JSON.stringify({
-      message: opts.message,
-      content: opts.contentBase64,
-      sha: blobSha,
-      branch: opts.branch,
-    }),
+    body: JSON.stringify({ sha: commit.sha }),
   })
 }
 
@@ -462,25 +514,17 @@ async function main () {
       if (!process.env.GITHUB_TOKEN) {
         throw new Error('GITHUB_TOKEN is required to create the release branch')
       }
+      if (state === 'at-base') {
+        console.log(`Branch ${releaseBranch} exists at base HEAD with no bump; recovering by committing.`)
+      }
       pkg.version = newVersion
       const nextPkg = JSON.stringify(pkg, null, 2) + '\n'
-      const contentBase64 = Buffer.from(nextPkg, 'utf8').toString('base64')
-      if (state === 'missing') {
-        await createReleaseBranchWithBump(repo, {
-          base: baseBranch,
-          branch: releaseBranch,
-          message: `v${newVersion}`,
-          contentBase64,
-        })
-      } else {
-        console.log(`Branch ${releaseBranch} exists at base HEAD with no bump; recovering by committing.`)
-        await commitBumpToExistingBranch(repo, {
-          base: baseBranch,
-          branch: releaseBranch,
-          message: `v${newVersion}`,
-          contentBase64,
-        })
-      }
+      await commitFilesToBranch(repo, {
+        base: baseBranch,
+        branch: releaseBranch,
+        message: `v${newVersion}`,
+        files: [{ path: 'package.json', content: nextPkg }],
+      })
     }
   }
 
