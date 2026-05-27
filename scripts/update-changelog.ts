@@ -418,13 +418,15 @@ async function main () {
   // delete its branch.
   let seedPreamble: string | null = null
   if (!dryRun && process.env.GITHUB_TOKEN) {
-    const openReleasePRs = await gh<Array<{ number: number, body: string | null, head: { ref: string }, base: { ref: string }, updated_at: string }>>(
-      `/repos/${repo.owner}/${repo.repo}/pulls?state=open&per_page=100&base=${encodeURIComponent(baseBranch)}`,
+    const openReleasePRs = await gh<Array<{ number: number, body: string | null, head: { ref: string, repo: { full_name: string } | null }, base: { ref: string }, updated_at: string }>>(
+      `/repos/${repo.owner}/${repo.repo}/pulls?state=open&per_page=100&base=${encodeURIComponent(baseBranch)}&head=${repo.owner}:`,
       { requireAuth: true },
     )
+    const sameRepo = `${repo.owner}/${repo.repo}`
     const stale = openReleasePRs
       .filter(pr =>
-        pr.head.ref.startsWith('release/v')
+        pr.head.repo?.full_name === sameRepo
+        && pr.head.ref.startsWith('release/v')
         && pr.head.ref !== releaseBranch
         && pr.base.ref === baseBranch,
       )
