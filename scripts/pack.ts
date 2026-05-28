@@ -15,18 +15,24 @@
 //                    a workflow artifact.
 //   GITHUB_OUTPUT    set by the runner; receives `files=<json array>`.
 //   GITHUB_REF       must be `refs/tags/v*` (set automatically)
+//   PACKAGES         newline-separated list of publishable workspace
+//                    paths/globs; when set, the script packs each
+//                    listed workspace instead of the root.
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 
-function runCapture (cmd: string, args: string[]): string {
-  console.log('$', cmd, ...args)
+import { resolveWorkspaces } from './_workspaces.ts'
+
+function runCapture (cmd: string, args: string[], cwd?: string): string {
+  console.log('$', cmd, ...args, cwd ? `(cwd: ${cwd})` : '')
   return execFileSync(cmd, args, {
     stdio: ['ignore', 'pipe', 'inherit'],
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
+    cwd,
   })
 }
 
@@ -70,15 +76,24 @@ function main () {
   mkdirSync(outDir, { recursive: true })
 
   const hasPnpmLock = existsSync(resolve(process.cwd(), 'pnpm-lock.yaml'))
+  const packagesInput = process.env.PACKAGES?.trim() ?? ''
+  const targets = packagesInput.length
+    ? resolveWorkspaces(process.cwd(), packagesInput).map(ws => ({ name: ws.name, cwd: ws.dir }))
+    : [{ name: '<root>', cwd: process.cwd() }]
 
-  let stdout: string
-  if (hasPnpmLock) {
-    stdout = runCapture('pnpm', ['pack', '--pack-destination', outDir, '--json'])
-  } else {
-    stdout = runCapture('npm', ['pack', '--pack-destination', outDir, '--json', '--silent'])
+  const filenames: string[] = []
+  for (const target of targets) {
+    const stdout = hasPnpmLock
+      ? runCapture('pnpm', ['pack', '--pack-destination', outDir, '--json'], target.cwd)
+      : runCapture('npm', ['pack', '--pack-destination', outDir, '--json', '--silent'], target.cwd)
+    const packed = parseFilenames(stdout)
+    for (const filename of packed) {
+      if (filenames.includes(filename)) {
+        throw new Error(`Pack tool produced duplicate tarball '${filename}' (from ${target.name}); workspace package names and versions must be unique.`)
+      }
+      filenames.push(filename)
+    }
   }
-
-  const filenames = parseFilenames(stdout)
 
   for (const filename of filenames) {
     const tarballPath = resolve(outDir, filename)

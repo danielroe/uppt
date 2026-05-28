@@ -99,6 +99,7 @@ runs:
       shell: bash
       env:
         PACK_OUT_DIR: ${{ runner.temp }}/uppt-pack
+        PACKAGES: ${{ inputs.packages }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/pack.ts
 
     - name: Upload tarball artifact
