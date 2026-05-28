@@ -23,6 +23,10 @@ inputs:
     description: 'Whether the action should run `actions/checkout` itself. Set to `false` if the caller has already checked out with `fetch-depth: 0`.'
     required: false
     default: 'true'
+  packages:
+    description: 'Newline-separated list of publishable workspace directories, relative to the repo root. Each line is a path or glob (e.g. `packages/*`); `!`-prefixed entries are excluded; workspaces with `"private": true` are skipped. Omit for single-package repos.'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -57,4 +61,5 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
         RELEASE_BASE: ${{ inputs.base-branch }}
+        PACKAGES: ${{ inputs.packages }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/update-changelog.ts

@@ -5,6 +5,7 @@
   "description": "Composite GitHub Action to release PRs from conventional commits, tag on merge, publish to npm via OIDC.",
   "author": "Daniel Roe <daniel@roe.dev>",
   "license": "MIT",
+  "type": "module",
   "scripts": {
     "test": "vitest run",
     "test:types": "tsgo --noEmit"

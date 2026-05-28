@@ -13,12 +13,17 @@
 //   GITHUB_REPOSITORY  "owner/repo" (set automatically inside Actions)
 //   DRY_RUN            if set, skip git push and GitHub writes
 //   RELEASE_BASE       override base branch (default: current branch)
+//   PACKAGES           newline-separated list of publishable workspace
+//                      paths/globs; when set, the release bumps every
+//                      resolved workspace's package.json in lockstep
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
 import { Buffer } from 'node:buffer'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+
+import { lockstepVersionFromWorkspaces, resolveWorkspaces, type Workspace } from './_workspaces.ts'
 
 interface Commit {
   shortHash: string
@@ -420,6 +425,50 @@ async function isReleaseMergeCommit (
   }
 }
 
+/**
+ * Build the set of `package.json` files to write in the release commit.
+ *
+ * Single-package mode: just the root, bumped to `newVersion`.
+ *
+ * Monorepo mode: every listed workspace is rewritten to `newVersion`.
+ * The root is included only if its current `version` exactly matches
+ * the lockstep version; otherwise it's left untouched (it might be
+ * `0.0.0`, absent, or deliberately frozen, and none of those are uppt's
+ * business). When independent versioning lands, this is the place that
+ * decides which workspaces get a bump on a given release.
+ */
+export function buildBumpFileSet (opts: {
+  monorepo: boolean
+  workspaces: Workspace[]
+  rootPkg: Record<string, unknown>
+  currentVersion: string
+  newVersion: string
+}): Array<{ path: string, content: string }> {
+  const files: Array<{ path: string, content: string }> = []
+
+  if (!opts.monorepo) {
+    const updated = { ...opts.rootPkg, version: opts.newVersion }
+    files.push({ path: 'package.json', content: JSON.stringify(updated, null, 2) + '\n' })
+    return files
+  }
+
+  let rootCoveredByWorkspaces = false
+  for (const ws of opts.workspaces) {
+    const wsPkg = JSON.parse(readFileSync(resolve(ws.dir, 'package.json'), 'utf8')) as Record<string, unknown>
+    wsPkg.version = opts.newVersion
+    const path = ws.relDir === '.' ? 'package.json' : `${ws.relDir}/package.json`
+    if (path === 'package.json') rootCoveredByWorkspaces = true
+    files.push({ path, content: JSON.stringify(wsPkg, null, 2) + '\n' })
+  }
+
+  if (!rootCoveredByWorkspaces && opts.rootPkg.version === opts.currentVersion) {
+    const updated = { ...opts.rootPkg, version: opts.newVersion }
+    files.push({ path: 'package.json', content: JSON.stringify(updated, null, 2) + '\n' })
+  }
+
+  return files
+}
+
 async function main () {
   const dryRun = Boolean(process.env.DRY_RUN)
   const repo = getRepo()
@@ -442,10 +491,24 @@ async function main () {
     return
   }
 
-  const pkgPath = resolve(process.cwd(), 'package.json')
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+  const packagesInput = process.env.PACKAGES?.trim() ?? ''
+  const monorepo = packagesInput.length > 0
+  const workspaces: Workspace[] = monorepo
+    ? resolveWorkspaces(process.cwd(), packagesInput)
+    : []
+
+  const rootPkgPath = resolve(process.cwd(), 'package.json')
+  const rootPkg = JSON.parse(readFileSync(rootPkgPath, 'utf8'))
+
+  const currentVersion = monorepo
+    ? lockstepVersionFromWorkspaces(workspaces)
+    : rootPkg.version
+  if (typeof currentVersion !== 'string') {
+    throw new Error('Cannot determine current version: root package.json has no `version` field. Set one, or use the `packages` input to release a monorepo.')
+  }
+
   const bump = determineBump(commits)
-  const newVersion = incVersion(pkg.version, bump)
+  const newVersion = incVersion(currentVersion, bump)
   const releaseBranch = `release/v${newVersion}`
 
   const changelog = formatChangelog(commits, {
@@ -455,7 +518,10 @@ async function main () {
     toRef: releaseBranch,
   })
 
-  console.log(`Current: ${pkg.version}  ->  ${newVersion} (${bump})`)
+  console.log(`Current: ${currentVersion}  ->  ${newVersion} (${bump})`)
+  if (monorepo) {
+    console.log(`Workspaces (${workspaces.length}): ${workspaces.map(ws => ws.name).join(', ')}`)
+  }
   console.log(`Base branch: ${baseBranch}`)
   console.log(`Release branch: ${releaseBranch}`)
   console.log(`Commits: ${commits.length}`)
@@ -517,13 +583,18 @@ async function main () {
       if (state === 'at-base') {
         console.log(`Branch ${releaseBranch} exists at base HEAD with no bump; recovering by committing.`)
       }
-      pkg.version = newVersion
-      const nextPkg = JSON.stringify(pkg, null, 2) + '\n'
+      const files = buildBumpFileSet({
+        monorepo,
+        workspaces,
+        rootPkg,
+        currentVersion,
+        newVersion,
+      })
       await commitFilesToBranch(repo, {
         base: baseBranch,
         branch: releaseBranch,
         message: `v${newVersion}`,
-        files: [{ path: 'package.json', content: nextPkg }],
+        files,
       })
     }
   }
@@ -603,7 +674,10 @@ async function main () {
   }
 }
 
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+// Run as a script, not when imported by tests.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}
