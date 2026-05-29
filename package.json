@@ -10,7 +10,7 @@
   },
   "devDependencies": {
     "@types/node": "24.12.4",
-    "@typescript/native-preview": "7.0.0-dev.20260522.1"
+    "@typescript/native-preview": "7.0.0-dev.20260527.2"
   },
-  "packageManager": "pnpm@11.3.0"
+  "packageManager": "pnpm@11.5.0"
 }
