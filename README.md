@@ -213,6 +213,9 @@ The lockstep version comes from the workspaces themselves: every listed package 
 > [!IMPORTANT]
 > The `packages:` value on `uppt/pr` and `uppt/pack` must match. If they diverge, the release PR and the published tarballs will cover different sets of packages.
 
+> [!IMPORTANT]
+> If you use pnpm, every workspace you list under `packages:` must also be listed in your `pnpm-workspace.yaml`. `pnpm pack` resolves `workspace:` and `catalog:` specifiers via the workspace graph, so a directory missing from `pnpm-workspace.yaml` will produce a tarball with unresolved specifiers (or fail outright).
+
 > [!NOTE]
 > Independent versioning (per-package tags and cadence) is not yet supported. Track [#9](https://github.com/danielroe/uppt/issues/9) if you need it.
 
