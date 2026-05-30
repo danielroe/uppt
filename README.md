@@ -185,7 +185,7 @@ uppt runs your package's lifecycle scripts at one specific point and skips them 
 
 uppt supports lockstep monorepos: every publishable package shares a single version, gets bumped together, lands under one `vX.Y.Z` tag, and is staged in one workflow run.
 
-Declare the publishable workspaces by passing the same `packages:` input to both `uppt/pr` and `uppt/pack`. Each line is a directory path or a glob; `!`-prefixed entries are excluded; workspaces whose `package.json` has `"private": true` are silently skipped, so playgrounds and example apps stay out of npm.
+Declare the publishable workspaces by passing the same `packages:` input to both `uppt/pr` and `uppt/pack`. Each line is a directory path or a glob; `!`-prefixed entries are excluded; workspaces whose `package.json` has `"private": true` are silently skipped (even when listed by an exact path), so playgrounds and example apps stay out of npm.
 
 ```yaml
   pr:
