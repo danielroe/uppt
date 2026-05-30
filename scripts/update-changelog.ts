@@ -13,12 +13,17 @@
 //   GITHUB_REPOSITORY  "owner/repo" (set automatically inside Actions)
 //   DRY_RUN            if set, skip git push and GitHub writes
 //   RELEASE_BASE       override base branch (default: current branch)
+//   PACKAGES           newline-separated list of publishable workspace
+//                      paths/globs; when set, the release bumps every
+//                      resolved workspace's package.json in lockstep
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
 import { Buffer } from 'node:buffer'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+
+import { lockstepVersionFromWorkspaces, resolveWorkspaces, type Workspace } from './_workspaces.ts'
 
 interface Commit {
   shortHash: string
@@ -161,9 +166,17 @@ function determineBump (commits: Commit[]): 'major' | 'minor' | 'patch' {
   return 'patch'
 }
 
-function incVersion (version: string, bump: 'major' | 'minor' | 'patch'): string {
-  const match = version.match(/^(\d+)\.(\d+)\.(\d+)/)
-  if (!match) throw new Error(`Cannot parse version: ${version}`)
+export function incVersion (version: string, bump: 'major' | 'minor' | 'patch'): string {
+  // uppt does not (yet) model prerelease or build-metadata releases.
+  // Silently rolling `1.2.3-rc.1` forward to `1.2.4` would lose the
+  // prerelease line, which is almost never what a maintainer wants.
+  // Refuse and let them reconcile.
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)$/)
+  if (!match) {
+    throw new Error(
+      `Cannot bump version "${version}": expected strict "X.Y.Z" semver. uppt does not currently support prerelease or build-metadata versions.`,
+    )
+  }
   let [, major, minor, patch] = match.map(Number) as [number, number, number, number, number]
   if (bump === 'major') { major += 1; minor = 0; patch = 0 }
   else if (bump === 'minor') { minor += 1; patch = 0 }
@@ -302,54 +315,106 @@ async function getReleaseBranchState (
   return branchHead === baseInfo.commit.sha ? 'at-base' : 'has-bump'
 }
 
-async function getPackageJsonBlobSha (
-  repo: { owner: string, repo: string },
-  ref: string,
-): Promise<string> {
-  const file = await gh<{ sha: string }>(
-    `/repos/${repo.owner}/${repo.repo}/contents/package.json?ref=${encodeURIComponent(ref)}`,
-    { requireAuth: true },
-  )
-  return file.sha
+interface FileToCommit {
+  /** Path relative to the repo root, using forward slashes. */
+  path: string
+  /** Raw UTF-8 contents to write at that path. */
+  content: string
 }
 
-async function createReleaseBranchWithBump (
+/**
+ * Land one atomic commit on `opts.branch` containing every file in
+ * `opts.files`, using the Git Data API. Creates the branch at `opts.base`
+ * if it doesn't exist yet. The resulting commit has the branch's current
+ * tip as its sole parent (or `opts.base`'s tip, if the branch was just
+ * created), so the ref fast-forwards.
+ */
+async function commitFilesToBranch (
   repo: { owner: string, repo: string },
-  opts: { base: string, branch: string, message: string, contentBase64: string },
+  opts: { base: string, branch: string, message: string, files: FileToCommit[] },
 ): Promise<void> {
-  const baseInfo = await gh<{ commit: { sha: string } }>(
-    `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.base)}`,
+  if (!opts.files.length) {
+    throw new Error('commitFilesToBranch: refusing to commit with no files')
+  }
+
+  let parentSha: string
+  try {
+    const branchInfo = await gh<{ commit: { sha: string } }>(
+      `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.branch)}`,
+      { requireAuth: true },
+    )
+    parentSha = branchInfo.commit.sha
+  } catch (err) {
+    if (!(err instanceof Error) || !/-> 404\b/.test(err.message)) throw err
+    const baseInfo = await gh<{ commit: { sha: string } }>(
+      `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.base)}`,
+      { requireAuth: true },
+    )
+    await gh(`/repos/${repo.owner}/${repo.repo}/git/refs`, {
+      method: 'POST',
+      requireAuth: true,
+      body: JSON.stringify({
+        ref: `refs/heads/${opts.branch}`,
+        sha: baseInfo.commit.sha,
+      }),
+    })
+    parentSha = baseInfo.commit.sha
+  }
+
+  const parentCommit = await gh<{ tree: { sha: string } }>(
+    `/repos/${repo.owner}/${repo.repo}/git/commits/${parentSha}`,
     { requireAuth: true },
   )
-  const blobSha = await getPackageJsonBlobSha(repo, opts.base)
 
-  await gh(`/repos/${repo.owner}/${repo.repo}/git/refs`, {
-    method: 'POST',
+  const blobs = await Promise.all(opts.files.map(async (file) => {
+    const blob = await gh<{ sha: string }>(
+      `/repos/${repo.owner}/${repo.repo}/git/blobs`,
+      {
+        method: 'POST',
+        requireAuth: true,
+        body: JSON.stringify({
+          content: Buffer.from(file.content, 'utf8').toString('base64'),
+          encoding: 'base64',
+        }),
+      },
+    )
+    return { path: file.path, sha: blob.sha }
+  }))
+
+  const tree = await gh<{ sha: string }>(
+    `/repos/${repo.owner}/${repo.repo}/git/trees`,
+    {
+      method: 'POST',
+      requireAuth: true,
+      body: JSON.stringify({
+        base_tree: parentCommit.tree.sha,
+        tree: blobs.map(b => ({
+          path: b.path,
+          mode: '100644',
+          type: 'blob',
+          sha: b.sha,
+        })),
+      }),
+    },
+  )
+
+  const commit = await gh<{ sha: string }>(
+    `/repos/${repo.owner}/${repo.repo}/git/commits`,
+    {
+      method: 'POST',
+      requireAuth: true,
+      body: JSON.stringify({
+        message: opts.message,
+        tree: tree.sha,
+        parents: [parentSha],
+      }),
+    },
+  )
+
+  await gh(`/repos/${repo.owner}/${repo.repo}/git/refs/heads/${opts.branch}`, {
+    method: 'PATCH',
     requireAuth: true,
-    body: JSON.stringify({
-      ref: `refs/heads/${opts.branch}`,
-      sha: baseInfo.commit.sha,
-    }),
-  })
-
-  await commitBumpToExistingBranch(repo, { ...opts, blobSha })
-}
-
-async function commitBumpToExistingBranch (
-  repo: { owner: string, repo: string },
-  opts: { base: string, branch: string, message: string, contentBase64: string, blobSha?: string },
-): Promise<void> {
-  const blobSha = opts.blobSha ?? await getPackageJsonBlobSha(repo, opts.branch)
-
-  await gh(`/repos/${repo.owner}/${repo.repo}/contents/package.json`, {
-    method: 'PUT',
-    requireAuth: true,
-    body: JSON.stringify({
-      message: opts.message,
-      content: opts.contentBase64,
-      sha: blobSha,
-      branch: opts.branch,
-    }),
+    body: JSON.stringify({ sha: commit.sha }),
   })
 }
 
@@ -366,6 +431,49 @@ async function isReleaseMergeCommit (
   } catch {
     return false
   }
+}
+
+/**
+ * Build the set of `package.json` files to write in the release commit.
+ *
+ * Single-package mode: just the root, bumped to `newVersion`.
+ *
+ * Monorepo mode: every listed workspace is rewritten to `newVersion`.
+ * The root is included only if its current `version` exactly matches
+ * the lockstep version; otherwise it's left untouched (it might be
+ * `0.0.0`, absent, or deliberately frozen, and none of those are uppt's
+ * business). When independent versioning lands, this is the place that
+ * decides which workspaces get a bump on a given release.
+ */
+export function buildBumpFileSet (opts: {
+  monorepo: boolean
+  workspaces: Workspace[]
+  rootPkg: Record<string, unknown>
+  currentVersion: string
+  newVersion: string
+}): Array<{ path: string, content: string }> {
+  const files: Array<{ path: string, content: string }> = []
+
+  if (!opts.monorepo) {
+    const updated = { ...opts.rootPkg, version: opts.newVersion }
+    files.push({ path: 'package.json', content: JSON.stringify(updated, null, 2) + '\n' })
+    return files
+  }
+
+  let rootCoveredByWorkspaces = false
+  for (const ws of opts.workspaces) {
+    const wsPkg = { ...ws.pkg, version: opts.newVersion }
+    const path = ws.relDir === '.' ? 'package.json' : `${ws.relDir}/package.json`
+    if (path === 'package.json') rootCoveredByWorkspaces = true
+    files.push({ path, content: JSON.stringify(wsPkg, null, 2) + '\n' })
+  }
+
+  if (!rootCoveredByWorkspaces && opts.rootPkg.version === opts.currentVersion) {
+    const updated = { ...opts.rootPkg, version: opts.newVersion }
+    files.push({ path: 'package.json', content: JSON.stringify(updated, null, 2) + '\n' })
+  }
+
+  return files
 }
 
 async function main () {
@@ -390,10 +498,24 @@ async function main () {
     return
   }
 
-  const pkgPath = resolve(process.cwd(), 'package.json')
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+  const packagesInput = process.env.PACKAGES?.trim() ?? ''
+  const monorepo = packagesInput.length > 0
+  const workspaces: Workspace[] = monorepo
+    ? resolveWorkspaces(process.cwd(), packagesInput)
+    : []
+
+  const rootPkgPath = resolve(process.cwd(), 'package.json')
+  const rootPkg = JSON.parse(readFileSync(rootPkgPath, 'utf8'))
+
+  const currentVersion = monorepo
+    ? lockstepVersionFromWorkspaces(workspaces)
+    : rootPkg.version
+  if (typeof currentVersion !== 'string') {
+    throw new Error('Cannot determine current version: root package.json has no `version` field. Set one, or use the `packages` input to release a monorepo.')
+  }
+
   const bump = determineBump(commits)
-  const newVersion = incVersion(pkg.version, bump)
+  const newVersion = incVersion(currentVersion, bump)
   const releaseBranch = `release/v${newVersion}`
 
   const changelog = formatChangelog(commits, {
@@ -403,7 +525,10 @@ async function main () {
     toRef: releaseBranch,
   })
 
-  console.log(`Current: ${pkg.version}  ->  ${newVersion} (${bump})`)
+  console.log(`Current: ${currentVersion}  ->  ${newVersion} (${bump})`)
+  if (monorepo) {
+    console.log(`Workspaces (${workspaces.length}): ${workspaces.map(ws => ws.name).join(', ')}`)
+  }
   console.log(`Base branch: ${baseBranch}`)
   console.log(`Release branch: ${releaseBranch}`)
   console.log(`Commits: ${commits.length}`)
@@ -462,25 +587,22 @@ async function main () {
       if (!process.env.GITHUB_TOKEN) {
         throw new Error('GITHUB_TOKEN is required to create the release branch')
       }
-      pkg.version = newVersion
-      const nextPkg = JSON.stringify(pkg, null, 2) + '\n'
-      const contentBase64 = Buffer.from(nextPkg, 'utf8').toString('base64')
-      if (state === 'missing') {
-        await createReleaseBranchWithBump(repo, {
-          base: baseBranch,
-          branch: releaseBranch,
-          message: `v${newVersion}`,
-          contentBase64,
-        })
-      } else {
+      if (state === 'at-base') {
         console.log(`Branch ${releaseBranch} exists at base HEAD with no bump; recovering by committing.`)
-        await commitBumpToExistingBranch(repo, {
-          base: baseBranch,
-          branch: releaseBranch,
-          message: `v${newVersion}`,
-          contentBase64,
-        })
       }
+      const files = buildBumpFileSet({
+        monorepo,
+        workspaces,
+        rootPkg,
+        currentVersion,
+        newVersion,
+      })
+      await commitFilesToBranch(repo, {
+        base: baseBranch,
+        branch: releaseBranch,
+        message: `v${newVersion}`,
+        files,
+      })
     }
   }
 
@@ -559,7 +681,10 @@ async function main () {
   }
 }
 
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+// Run as a script, not when imported by tests.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}

@@ -10,7 +10,7 @@ The aim of **uppt** is to make a very simple, secure release workflow for mainta
 
 ### Set up your package for trusted publishing on npmjs.com
 
-1. Visit `https://npmjs.com/<package-name>/settings` and add a new trusted publisher entry, pointing at your repo and the `release.yml` workflow, with the `npm stage publish` permission chip.  Set the 'Environment name' to 'npm'.
+1. Visit `https://npmjs.com/<package-name>/settings` and add a new trusted publisher entry, pointing at your repo and the `release.yml` workflow, with the `npm stage publish` permission chip.  Set the 'Environment name' to 'npm'. In a monorepo, repeat this once per published package, pointing each entry at the same workflow and environment.
 
 > [!NOTE]
 > [Staged publishing](https://docs.npmjs.com/staged-publishing/) requires you to approve the publish before it goes live.
@@ -81,10 +81,8 @@ jobs:
   # The chained dispatch from `release` lands here as a `workflow_dispatch`
   # event on a `vX.Y.Z` tag ref. The `pack` job installs deps, runs
   # `pnpm pack` (or `npm pack`), and uploads the tarball as a workflow
-  # artifact. Lifecycle scripts (`prepack`, `prepare`, `postpack`) run
-  # here, in a job with `permissions: {}` and no `npm` environment.
-  # Manual recovery uses the same path.
-  # (Run workflow -> pick a `v*` tag).
+  # artifact. See "Lifecycle scripts" below for what runs where. Manual
+  # recovery uses the same path (Run workflow -> pick a `v*` tag).
   pack:
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -137,6 +135,7 @@ Whenever you push to the default branch, this action parses conventional commits
 | `base-branch` | default branch | Base branch for the release PR. |
 | `node-version` | `24` | Node version for the scripts. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). |
 | `checkout` | `true` | Set to `false` if the caller has already checked out with `fetch-depth: 0`. |
+| `packages` | _(unset)_ | Newline-separated list of publishable workspace directories (paths or globs, e.g. `packages/*`). When set, uppt operates in monorepo lockstep mode. See [Monorepo support](#monorepo-support). |
 
 ### Creates a release (`danielroe/uppt/release`)
 
@@ -158,6 +157,7 @@ This subaction installs the package's dependencies, runs `pnpm pack --json` (if 
 | `node-version` | `24` | Node version for the scripts. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). Ignored when `install` is `false`. |
 | `checkout` | `true` | Set to `false` if the caller has already checked out the tag ref. |
 | `install` | `true` | Set to `false` to handle `actions/setup-node` and dependency installation yourself. Useful when you want a pinned package manager version, a cached `node_modules`, or a hardened install policy. When `false`, the caller must put `node`, `npm`, and any package manager on PATH before `uppt/pack` runs. |
+| `packages` | _(unset)_ | Newline-separated list of publishable workspace directories (paths or globs). Must match the value passed to `uppt/pr`. See [Monorepo support](#monorepo-support). |
 
 | Output | Description |
 | --- | --- |
@@ -167,14 +167,57 @@ This subaction installs the package's dependencies, runs `pnpm pack --json` (if 
 
 This subaction downloads the tarball uploaded by `uppt/pack` in the same workflow run and runs `npm stage publish ./<tarball>.tgz` with OIDC authentication. The staged version then needs to be approved by a maintainer with 2FA on npmjs.com before it goes live.
 
-> [!IMPORTANT]
-> `prepublishOnly` is **not** invoked: `uppt/publish` publishes the prebuilt tarball with `--ignore-scripts`. Move any logic you previously had in `prepublishOnly` into `prepack` so it runs during `uppt/pack` and the output lands in the tarball.
-
 | Input | Default | Description |
 | --- | --- | --- |
 | `node-version` | `24` | Node version for the scripts and for `npm stage publish`. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). |
 | `npm-access` | `public` | npm access level (`public` or `restricted`). |
 | `files` | _(scan artifact)_ | Optional JSON array of tarball filenames to publish, as emitted by `uppt/pack`'s `files` output. When omitted, every `*.tgz` in the downloaded artifact is published. |
+
+## Lifecycle scripts
+
+uppt runs your package's lifecycle scripts at one specific point and skips them everywhere else. The aim is to keep the runner that produces the tarball from executing more third-party code than it has to.
+
+- **During install** (inside `uppt/pack`): runs with `--ignore-scripts`. Your dependencies' `preinstall` / `install` / `postinstall` hooks do **not** fire, and neither does your own repo's `prepare`. This is deliberate: it's why a compromised transitive dependency can't run code on the publish runner. If your build genuinely needs a dependency's `postinstall` to have run, set `install: false` on `uppt/pack` and install yourself before the action runs.
+- **During pack** (inside `uppt/pack`, after install): `prepack`, `prepare`, and `postpack` run. This is where your build belongs.
+- **During publish** (inside `uppt/publish`): nothing runs. `prepublishOnly` is **not** invoked; the prebuilt tarball is published with `--ignore-scripts`. Move any logic you previously had in `prepublishOnly` into `prepack` so it runs during `uppt/pack` and the output lands in the tarball.
+
+## Monorepo support
+
+uppt supports lockstep monorepos: every publishable package shares a single version, gets bumped together, lands under one `vX.Y.Z` tag, and is staged in one workflow run.
+
+Declare the publishable workspaces by passing the same `packages:` input to both `uppt/pr` and `uppt/pack`. Each line is a directory path or a glob; `!`-prefixed entries are excluded; workspaces whose `package.json` has `"private": true` are silently skipped (even when listed by an exact path), so playgrounds and example apps stay out of npm.
+
+```yaml
+  pr:
+    # ...
+    steps:
+      - uses: danielroe/uppt/pr@<sha>
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          packages: |
+            packages/*
+            !packages/playground
+
+  pack:
+    # ...
+    steps:
+      - uses: danielroe/uppt/pack@<sha>
+        with:
+          packages: |
+            packages/*
+            !packages/playground
+```
+
+The lockstep version comes from the workspaces themselves: every listed package must agree on a single semver `version`, and that's the version uppt bumps from. The root `package.json#version` (if present) is only bumped when it already matches the lockstep version, so a `0.0.0` or absent root version is left untouched.
+
+> [!IMPORTANT]
+> The `packages:` value on `uppt/pr` and `uppt/pack` must match. If they diverge, the release PR and the published tarballs will cover different sets of packages.
+
+> [!IMPORTANT]
+> If you use pnpm, every workspace you list under `packages:` must also be listed in your `pnpm-workspace.yaml`. `pnpm pack` resolves `workspace:` and `catalog:` specifiers via the workspace graph, so a directory missing from `pnpm-workspace.yaml` will produce a tarball with unresolved specifiers (or fail outright).
+
+> [!NOTE]
+> Independent versioning (per-package tags and cadence) is not yet supported. Track [#9](https://github.com/danielroe/uppt/issues/9) if you need it.
 
 ## Prerequisites
 

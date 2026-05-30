@@ -32,6 +32,9 @@ jobs:
       - name: 📦 Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: 🧪 Test
+        run: pnpm test
+
       - name: 💪 Test types
         run: pnpm test:types
 
