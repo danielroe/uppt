@@ -166,9 +166,17 @@ function determineBump (commits: Commit[]): 'major' | 'minor' | 'patch' {
   return 'patch'
 }
 
-function incVersion (version: string, bump: 'major' | 'minor' | 'patch'): string {
-  const match = version.match(/^(\d+)\.(\d+)\.(\d+)/)
-  if (!match) throw new Error(`Cannot parse version: ${version}`)
+export function incVersion (version: string, bump: 'major' | 'minor' | 'patch'): string {
+  // uppt does not (yet) model prerelease or build-metadata releases.
+  // Silently rolling `1.2.3-rc.1` forward to `1.2.4` would lose the
+  // prerelease line, which is almost never what a maintainer wants.
+  // Refuse and let them reconcile.
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)$/)
+  if (!match) {
+    throw new Error(
+      `Cannot bump version "${version}": expected strict "X.Y.Z" semver. uppt does not currently support prerelease or build-metadata versions.`,
+    )
+  }
   let [, major, minor, patch] = match.map(Number) as [number, number, number, number, number]
   if (bump === 'major') { major += 1; minor = 0; patch = 0 }
   else if (bump === 'minor') { minor += 1; patch = 0 }

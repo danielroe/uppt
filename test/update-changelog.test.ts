@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { buildBumpFileSet } from '../scripts/update-changelog.ts'
+import { buildBumpFileSet, incVersion } from '../scripts/update-changelog.ts'
 import { resolveWorkspaces } from '../scripts/_workspaces.ts'
 
 let tmp: string
@@ -21,6 +21,32 @@ function writePackage (relDir: string, contents: Record<string, unknown>) {
   mkdirSync(dir, { recursive: true })
   writeFileSync(resolve(dir, 'package.json'), JSON.stringify(contents, null, 2))
 }
+
+describe('incVersion', () => {
+  it('bumps patch', () => {
+    expect(incVersion('1.2.3', 'patch')).toBe('1.2.4')
+  })
+
+  it('bumps minor and resets patch', () => {
+    expect(incVersion('1.2.3', 'minor')).toBe('1.3.0')
+  })
+
+  it('bumps major and resets minor and patch', () => {
+    expect(incVersion('1.2.3', 'major')).toBe('2.0.0')
+  })
+
+  it('throws on a prerelease version', () => {
+    expect(() => incVersion('1.2.3-rc.1', 'patch')).toThrowError(/strict "X\.Y\.Z" semver/)
+  })
+
+  it('throws on a version with build metadata', () => {
+    expect(() => incVersion('1.2.3+sha.abc', 'patch')).toThrowError(/strict "X\.Y\.Z" semver/)
+  })
+
+  it('throws on a non-semver string', () => {
+    expect(() => incVersion('not-a-version', 'patch')).toThrowError(/strict "X\.Y\.Z" semver/)
+  })
+})
 
 describe('buildBumpFileSet', () => {
   describe('single-package mode', () => {
