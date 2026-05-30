@@ -44,6 +44,12 @@ export function parsePackagesInput (raw: string): string[] {
  * Expand a list of glob patterns rooted at `rootDir` into directories
  * that contain a `package.json`. Patterns starting with `!` are
  * treated as exclusions.
+ *
+ * Literal (non-glob) patterns are required to match a real workspace
+ * directory: a typo like `packages/aa` in an otherwise-valid list would
+ * otherwise be silently dropped. Glob patterns are allowed to match
+ * nothing on their own; the aggregate "matched no directories" check in
+ * `resolveWorkspaces` covers the case where every pattern misses.
  */
 export function expandPackagePatterns (rootDir: string, patterns: string[]): string[] {
   const positive: string[] = []
@@ -56,10 +62,17 @@ export function expandPackagePatterns (rootDir: string, patterns: string[]): str
 
   const matched = new Set<string>()
   for (const pattern of positive) {
+    let hit = false
     for (const match of globSync(pattern, { cwd: rootDir })) {
       const abs = resolve(rootDir, match)
       if (!isDirectoryWithPackageJson(abs)) continue
       matched.add(abs)
+      hit = true
+    }
+    if (!hit && !isGlob(pattern)) {
+      throw new Error(
+        `\`packages\` entry "${pattern}" did not match a directory with a package.json. Fix the path or remove the entry.`,
+      )
     }
   }
   for (const pattern of negative) {
@@ -68,6 +81,10 @@ export function expandPackagePatterns (rootDir: string, patterns: string[]): str
     }
   }
   return [...matched].sort()
+}
+
+function isGlob (pattern: string): boolean {
+  return /[*?[\]{}]/.test(pattern)
 }
 
 function isDirectoryWithPackageJson (dir: string): boolean {

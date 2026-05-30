@@ -85,6 +85,19 @@ describe('expandPackagePatterns', () => {
       resolve(tmp, 'packages/a'),
     ])
   })
+
+  it('throws when a literal entry matches no directory', () => {
+    writePackage('packages/a', { name: 'a' })
+    expect(() => expandPackagePatterns(tmp, ['packages/a', 'packages/typo']))
+      .toThrowError(/"packages\/typo" did not match/)
+  })
+
+  it('does not throw when a glob entry matches nothing', () => {
+    writePackage('packages/a', { name: 'a' })
+    expect(expandPackagePatterns(tmp, ['packages/a', 'apps/*'])).toEqual([
+      resolve(tmp, 'packages/a'),
+    ])
+  })
 })
 
 describe('resolveWorkspaces', () => {
