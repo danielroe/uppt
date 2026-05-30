@@ -19,6 +19,10 @@ inputs:
     description: 'Whether the action should install the package''s dependencies itself. Set to `false` if the caller has already installed (e.g. with a pinned package manager version, a cached `node_modules`, or a hardened install policy). When `false`, the action will not run `actions/setup-node` either; the caller is responsible for putting `node`, `npm`, and any package manager on PATH before `uppt/pack` runs.'
     required: false
     default: 'true'
+  packages:
+    description: 'Newline-separated list of publishable workspace directories, relative to the repo root. Each line is a path or glob (e.g. `packages/*`); `!`-prefixed entries are excluded; workspaces with `"private": true` are skipped. Must match the value passed to `uppt/pr`. Omit for single-package repos.'
+    required: false
+    default: ''
 
 outputs:
   files:
