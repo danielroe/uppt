@@ -17,12 +17,15 @@ export interface Workspace {
   name: string
   /** Value of `version` in the workspace `package.json`, or `null` if absent. */
   version: string | null
+  /** Parsed contents of the workspace `package.json`. */
+  pkg: Record<string, unknown>
 }
 
 interface RawPackageJson {
   name?: string
   version?: string
   private?: boolean
+  [key: string]: unknown
 }
 
 /**
@@ -109,6 +112,7 @@ export function resolveWorkspaces (rootDir: string, packagesInput: string): Work
       relDir: relative(rootDir, dir).split(sep).join('/') || '.',
       name: pkg.name,
       version: typeof pkg.version === 'string' ? pkg.version : null,
+      pkg,
     })
   }
   return workspaces

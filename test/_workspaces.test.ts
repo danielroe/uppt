@@ -94,9 +94,27 @@ describe('resolveWorkspaces', () => {
 
     const workspaces = resolveWorkspaces(tmp, 'packages/*')
     expect(workspaces).toEqual([
-      { dir: resolve(tmp, 'packages/a'), relDir: 'packages/a', name: 'a', version: '1.0.0' },
-      { dir: resolve(tmp, 'packages/b'), relDir: 'packages/b', name: 'b', version: '1.0.0' },
+      {
+        dir: resolve(tmp, 'packages/a'),
+        relDir: 'packages/a',
+        name: 'a',
+        version: '1.0.0',
+        pkg: { name: 'a', version: '1.0.0' },
+      },
+      {
+        dir: resolve(tmp, 'packages/b'),
+        relDir: 'packages/b',
+        name: 'b',
+        version: '1.0.0',
+        pkg: { name: 'b', version: '1.0.0' },
+      },
     ])
+  })
+
+  it('exposes the parsed package.json on each workspace', () => {
+    writePackage('packages/a', { name: 'a', version: '1.0.0', dependencies: { foo: '^1' } })
+    const [ws] = resolveWorkspaces(tmp, 'packages/a')
+    expect(ws!.pkg).toEqual({ name: 'a', version: '1.0.0', dependencies: { foo: '^1' } })
   })
 
   it('treats a missing version as null', () => {

@@ -454,8 +454,7 @@ export function buildBumpFileSet (opts: {
 
   let rootCoveredByWorkspaces = false
   for (const ws of opts.workspaces) {
-    const wsPkg = JSON.parse(readFileSync(resolve(ws.dir, 'package.json'), 'utf8')) as Record<string, unknown>
-    wsPkg.version = opts.newVersion
+    const wsPkg = { ...ws.pkg, version: opts.newVersion }
     const path = ws.relDir === '.' ? 'package.json' : `${ws.relDir}/package.json`
     if (path === 'package.json') rootCoveredByWorkspaces = true
     files.push({ path, content: JSON.stringify(wsPkg, null, 2) + '\n' })
