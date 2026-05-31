@@ -117,9 +117,6 @@ jobs:
           files: ${{ needs.pack.outputs.files }}
 ```
 
-> [!IMPORTANT]
-> Once you add this workflow, it is strongly recommended to run `npx pin-github-action .github/workflows/release.yml` to pin each subaction's version to a SHA.
-
 ## What it does
 
 ### Creates a PR (`danielroe/uppt/pr`)
