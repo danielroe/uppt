@@ -13,7 +13,7 @@
   "devDependencies": {
     "@types/node": "24.12.4",
     "@typescript/native-preview": "7.0.0-dev.20260527.2",
-    "vitest": "^3.2.4"
+    "vitest": "^4.0.0"
   },
   "packageManager": "pnpm@11.5.0"
 }
