@@ -35,6 +35,21 @@ describe('incVersion', () => {
     expect(incVersion('1.2.3', 'major')).toBe('2.0.0')
   })
 
+  it('maps a major bump in 0.x.y to the minor slot', () => {
+    expect(incVersion('0.2.3', 'major')).toBe('0.3.0')
+  })
+
+  it('maps minor and patch bumps in 0.x.y to the patch slot', () => {
+    expect(incVersion('0.2.3', 'minor')).toBe('0.2.4')
+    expect(incVersion('0.2.3', 'patch')).toBe('0.2.4')
+  })
+
+  it('supports 0.0.x versions with the same 0.x.y mapping', () => {
+    expect(incVersion('0.0.3', 'major')).toBe('0.1.0')
+    expect(incVersion('0.0.3', 'minor')).toBe('0.0.4')
+    expect(incVersion('0.0.3', 'patch')).toBe('0.0.4')
+  })
+
   it('throws on a prerelease version', () => {
     expect(() => incVersion('1.2.3-rc.1', 'patch')).toThrowError(/strict "X\.Y\.Z" semver/)
   })

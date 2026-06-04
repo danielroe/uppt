@@ -178,7 +178,11 @@ export function incVersion (version: string, bump: 'major' | 'minor' | 'patch'):
     )
   }
   let [, major, minor, patch] = match.map(Number) as [number, number, number, number, number]
-  if (bump === 'major') { major += 1; minor = 0; patch = 0 }
+  if (major === 0) {
+    if (bump === 'major') { minor += 1; patch = 0 }
+    else { patch += 1 }
+  }
+  else if (bump === 'major') { major += 1; minor = 0; patch = 0 }
   else if (bump === 'minor') { minor += 1; patch = 0 }
   else { patch += 1 }
   return `${major}.${minor}.${patch}`
