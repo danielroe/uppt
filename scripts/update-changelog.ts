@@ -177,11 +177,18 @@ export function incVersion (version: string, bump: 'major' | 'minor' | 'patch'):
       `Cannot bump version "${version}": expected strict "X.Y.Z" semver. uppt does not currently support prerelease or build-metadata versions.`,
     )
   }
-  let [, major, minor, patch] = match.map(Number) as [number, number, number, number, number]
-  if (bump === 'major') { major += 1; minor = 0; patch = 0 }
-  else if (bump === 'minor') { minor += 1; patch = 0 }
-  else { patch += 1 }
-  return `${major}.${minor}.${patch}`
+
+  let [, x, y, z] = match.map(Number) as [number, number, number, number, number]
+
+  if (x === 0) {
+    if (bump === 'major') { bump = 'minor' }
+    else if (bump === 'minor') { bump = 'patch' }
+  }
+
+  if (bump === 'major') { x += 1; y = 0; z = 0 }
+  else if (bump === 'minor') { y += 1; z = 0 }
+  else { z += 1 }
+  return `${x}.${y}.${z}`
 }
 
 function formatChangelog (
