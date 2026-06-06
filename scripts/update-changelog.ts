@@ -22,6 +22,7 @@ import { execFileSync } from 'node:child_process'
 import { Buffer } from 'node:buffer'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { makePkgFormatter } from './pkg-format.ts'
 
 import { lockstepVersionFromWorkspaces, resolveWorkspaces, type Workspace } from './_workspaces.ts'
 
@@ -456,14 +457,16 @@ export function buildBumpFileSet (opts: {
   monorepo: boolean
   workspaces: Workspace[]
   rootPkg: Record<string, unknown>
+  rootPkgSource: string
   currentVersion: string
   newVersion: string
 }): Array<{ path: string, content: string }> {
   const files: Array<{ path: string, content: string }> = []
+  const formatRootPkg = makePkgFormatter(opts.rootPkgSource)
 
   if (!opts.monorepo) {
     const updated = { ...opts.rootPkg, version: opts.newVersion }
-    files.push({ path: 'package.json', content: JSON.stringify(updated, null, 2) + '\n' })
+    files.push({ path: 'package.json', content: formatRootPkg(updated) })
     return files
   }
 
@@ -472,12 +475,12 @@ export function buildBumpFileSet (opts: {
     const wsPkg = { ...ws.pkg, version: opts.newVersion }
     const path = ws.relDir === '.' ? 'package.json' : `${ws.relDir}/package.json`
     if (path === 'package.json') rootCoveredByWorkspaces = true
-    files.push({ path, content: JSON.stringify(wsPkg, null, 2) + '\n' })
+    files.push({ path, content: makePkgFormatter(ws.source)(wsPkg) })
   }
 
   if (!rootCoveredByWorkspaces && opts.rootPkg.version === opts.currentVersion) {
     const updated = { ...opts.rootPkg, version: opts.newVersion }
-    files.push({ path: 'package.json', content: JSON.stringify(updated, null, 2) + '\n' })
+    files.push({ path: 'package.json', content: formatRootPkg(updated) })
   }
 
   return files
@@ -512,7 +515,8 @@ async function main () {
     : []
 
   const rootPkgPath = resolve(process.cwd(), 'package.json')
-  const rootPkg = JSON.parse(readFileSync(rootPkgPath, 'utf8'))
+  const rootPkgSource = readFileSync(rootPkgPath, 'utf8')
+  const rootPkg = JSON.parse(rootPkgSource)
 
   const currentVersion = monorepo
     ? lockstepVersionFromWorkspaces(workspaces)
@@ -601,6 +605,7 @@ async function main () {
         monorepo,
         workspaces,
         rootPkg,
+        rootPkgSource,
         currentVersion,
         newVersion,
       })

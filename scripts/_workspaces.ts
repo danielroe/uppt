@@ -19,6 +19,8 @@ export interface Workspace {
   version: string | null
   /** Parsed contents of the workspace `package.json`. */
   pkg: Record<string, unknown>
+  /** Raw on-disk contents of the workspace `package.json`, preserved so writes can match the original indentation and line endings. */
+  source: string
 }
 
 interface RawPackageJson {
@@ -119,7 +121,8 @@ export function resolveWorkspaces (rootDir: string, packagesInput: string): Work
 
   const workspaces: Workspace[] = []
   for (const dir of dirs) {
-    const pkg = JSON.parse(readFileSync(resolve(dir, 'package.json'), 'utf8')) as RawPackageJson
+    const source = readFileSync(resolve(dir, 'package.json'), 'utf8')
+    const pkg = JSON.parse(source) as RawPackageJson
     if (pkg.private === true) continue
     if (!pkg.name) {
       throw new Error(`Workspace at ${relative(rootDir, dir) || '.'} has no "name" field in package.json.`)
@@ -130,6 +133,7 @@ export function resolveWorkspaces (rootDir: string, packagesInput: string): Work
       name: pkg.name,
       version: typeof pkg.version === 'string' ? pkg.version : null,
       pkg,
+      source,
     })
   }
   return workspaces

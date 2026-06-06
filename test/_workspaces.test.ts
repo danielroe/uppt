@@ -113,6 +113,7 @@ describe('resolveWorkspaces', () => {
         name: 'a',
         version: '1.0.0',
         pkg: { name: 'a', version: '1.0.0' },
+        source: JSON.stringify({ name: 'a', version: '1.0.0' }, null, 2),
       },
       {
         dir: resolve(tmp, 'packages/b'),
@@ -120,6 +121,7 @@ describe('resolveWorkspaces', () => {
         name: 'b',
         version: '1.0.0',
         pkg: { name: 'b', version: '1.0.0' },
+        source: JSON.stringify({ name: 'b', version: '1.0.0' }, null, 2),
       },
     ])
   })

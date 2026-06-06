@@ -16,10 +16,16 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true })
 })
 
-function writePackage (relDir: string, contents: Record<string, unknown>) {
+function writePackage (relDir: string, contents: Record<string, unknown>, opts: { indent?: string | number, trailingNewline?: string } = {}) {
   const dir = resolve(tmp, relDir)
   mkdirSync(dir, { recursive: true })
-  writeFileSync(resolve(dir, 'package.json'), JSON.stringify(contents, null, 2))
+  const indent = opts.indent ?? 2
+  const trailingNewline = opts.trailingNewline ?? ''
+  writeFileSync(resolve(dir, 'package.json'), JSON.stringify(contents, null, indent) + trailingNewline)
+}
+
+function sourceOf (pkg: Record<string, unknown>): string {
+  return JSON.stringify(pkg, null, 2) + '\n'
 }
 
 describe('incVersion', () => {
@@ -66,10 +72,12 @@ describe('incVersion', () => {
 describe('buildBumpFileSet', () => {
   describe('single-package mode', () => {
     it('rewrites the root package.json with the new version', () => {
+      const rootPkg = { name: 'pkg', version: '1.2.3' }
       const files = buildBumpFileSet({
         monorepo: false,
         workspaces: [],
-        rootPkg: { name: 'pkg', version: '1.2.3' },
+        rootPkg,
+        rootPkgSource: sourceOf(rootPkg),
         currentVersion: '1.2.3',
         newVersion: '1.2.4',
       })
@@ -79,15 +87,31 @@ describe('buildBumpFileSet', () => {
     })
 
     it('preserves other root fields', () => {
+      const rootPkg = { name: 'pkg', version: '1.2.3', description: 'hello', private: false }
       const files = buildBumpFileSet({
         monorepo: false,
         workspaces: [],
-        rootPkg: { name: 'pkg', version: '1.2.3', description: 'hello', private: false },
+        rootPkg,
+        rootPkgSource: sourceOf(rootPkg),
         currentVersion: '1.2.3',
         newVersion: '1.2.4',
       })
       const written = JSON.parse(files[0]!.content)
       expect(written).toEqual({ name: 'pkg', version: '1.2.4', description: 'hello', private: false })
+    })
+
+    it('preserves the existing indentation of the root package.json', () => {
+      const rootPkg = { name: 'pkg', version: '1.2.3' }
+      const tabSource = '{\n\t"name": "pkg",\n\t"version": "1.2.3"\n}\n'
+      const files = buildBumpFileSet({
+        monorepo: false,
+        workspaces: [],
+        rootPkg,
+        rootPkgSource: tabSource,
+        currentVersion: '1.2.3',
+        newVersion: '1.2.4',
+      })
+      expect(files[0]!.content).toBe('{\n\t"name": "pkg",\n\t"version": "1.2.4"\n}\n')
     })
   })
 
@@ -96,11 +120,13 @@ describe('buildBumpFileSet', () => {
       writePackage('packages/a', { name: 'a', version: '1.2.3' })
       writePackage('packages/b', { name: 'b', version: '1.2.3' })
       const workspaces = resolveWorkspaces(tmp, 'packages/*')
+      const rootPkg = { name: 'root', private: true }
 
       const files = buildBumpFileSet({
         monorepo: true,
         workspaces,
-        rootPkg: { name: 'root', private: true },
+        rootPkg,
+        rootPkgSource: sourceOf(rootPkg),
         currentVersion: '1.2.3',
         newVersion: '1.2.4',
       })
@@ -113,11 +139,13 @@ describe('buildBumpFileSet', () => {
     it('leaves the root alone when it has no version', () => {
       writePackage('packages/a', { name: 'a', version: '1.2.3' })
       const workspaces = resolveWorkspaces(tmp, 'packages/a')
+      const rootPkg = { name: 'root', private: true }
 
       const files = buildBumpFileSet({
         monorepo: true,
         workspaces,
-        rootPkg: { name: 'root', private: true },
+        rootPkg,
+        rootPkgSource: sourceOf(rootPkg),
         currentVersion: '1.2.3',
         newVersion: '1.2.4',
       })
@@ -128,11 +156,13 @@ describe('buildBumpFileSet', () => {
     it('bumps the root when its version equals the current lockstep', () => {
       writePackage('packages/a', { name: 'a', version: '1.2.3' })
       const workspaces = resolveWorkspaces(tmp, 'packages/a')
+      const rootPkg = { name: 'root', version: '1.2.3', private: true }
 
       const files = buildBumpFileSet({
         monorepo: true,
         workspaces,
-        rootPkg: { name: 'root', version: '1.2.3', private: true },
+        rootPkg,
+        rootPkgSource: sourceOf(rootPkg),
         currentVersion: '1.2.3',
         newVersion: '1.2.4',
       })
@@ -144,11 +174,13 @@ describe('buildBumpFileSet', () => {
     it('leaves the root alone when its version differs from the lockstep', () => {
       writePackage('packages/a', { name: 'a', version: '1.2.3' })
       const workspaces = resolveWorkspaces(tmp, 'packages/a')
+      const rootPkg = { name: 'root', version: '0.0.0', private: true }
 
       const files = buildBumpFileSet({
         monorepo: true,
         workspaces,
-        rootPkg: { name: 'root', version: '0.0.0', private: true },
+        rootPkg,
+        rootPkgSource: sourceOf(rootPkg),
         currentVersion: '1.2.3',
         newVersion: '1.2.4',
       })
@@ -159,11 +191,13 @@ describe('buildBumpFileSet', () => {
     it('preserves unrelated workspace fields', () => {
       writePackage('packages/a', { name: 'a', version: '1.2.3', dependencies: { foo: 'workspace:^' } })
       const workspaces = resolveWorkspaces(tmp, 'packages/a')
+      const rootPkg = { name: 'root', private: true }
 
       const files = buildBumpFileSet({
         monorepo: true,
         workspaces,
-        rootPkg: { name: 'root', private: true },
+        rootPkg,
+        rootPkgSource: sourceOf(rootPkg),
         currentVersion: '1.2.3',
         newVersion: '1.2.4',
       })
@@ -173,6 +207,26 @@ describe('buildBumpFileSet', () => {
         version: '1.2.4',
         dependencies: { foo: 'workspace:^' },
       })
+    })
+
+    it('preserves each workspace package.json indentation independently', () => {
+      writePackage('packages/a', { name: 'a', version: '1.2.3' }, { indent: '\t', trailingNewline: '\n' })
+      writePackage('packages/b', { name: 'b', version: '1.2.3' }, { indent: 4, trailingNewline: '\n' })
+      const workspaces = resolveWorkspaces(tmp, 'packages/*')
+      const rootPkg = { name: 'root', private: true }
+
+      const files = buildBumpFileSet({
+        monorepo: true,
+        workspaces,
+        rootPkg,
+        rootPkgSource: sourceOf(rootPkg),
+        currentVersion: '1.2.3',
+        newVersion: '1.2.4',
+      })
+
+      const byPath = Object.fromEntries(files.map(f => [f.path, f.content]))
+      expect(byPath['packages/a/package.json']).toBe('{\n\t"name": "a",\n\t"version": "1.2.4"\n}\n')
+      expect(byPath['packages/b/package.json']).toBe('{\n    "name": "b",\n    "version": "1.2.4"\n}\n')
     })
   })
 })
