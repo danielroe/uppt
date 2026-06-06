@@ -52,7 +52,7 @@ jobs:
       contents: write       # push the `release/vX.Y.Z` branch and delete superseded ones
       pull-requests: write  # create a release PR, update its body, close superseded PRs
     steps:
-      - uses: danielroe/uppt/pr@3a4fd445ce266b91dd73ced7ae8140cc0f9fc19c # v0.5.2
+      - uses: danielroe/uppt/pr@5ac2919d7db1704438eaa73aedb18173841222e6 # v0.5.3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -74,7 +74,7 @@ jobs:
       contents: write       # push the `vX.Y.Z` tag and create the GitHub release
       actions: write        # `gh workflow run release.yml --ref vX.Y.Z` chained dispatch
     steps:
-      - uses: danielroe/uppt/release@3a4fd445ce266b91dd73ced7ae8140cc0f9fc19c # v0.5.2
+      - uses: danielroe/uppt/release@5ac2919d7db1704438eaa73aedb18173841222e6 # v0.5.3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -94,7 +94,7 @@ jobs:
       files: ${{ steps.pack.outputs.files }}
     steps:
       - id: pack
-        uses: danielroe/uppt/pack@3a4fd445ce266b91dd73ced7ae8140cc0f9fc19c # v0.5.2
+        uses: danielroe/uppt/pack@5ac2919d7db1704438eaa73aedb18173841222e6 # v0.5.3
 
   # `publish` downloads the prebuilt tarball from the pack job's
   # artifact and stages it for publish.
@@ -112,7 +112,7 @@ jobs:
       id-token: write       # OIDC claim for npm trusted publisher
     environment: npm        # must match the trusted-publisher entry on npmjs.com
     steps:
-      - uses: danielroe/uppt/publish@3a4fd445ce266b91dd73ced7ae8140cc0f9fc19c # v0.5.2
+      - uses: danielroe/uppt/publish@5ac2919d7db1704438eaa73aedb18173841222e6 # v0.5.3
         with:
           files: ${{ needs.pack.outputs.files }}
 ```
@@ -188,7 +188,7 @@ Declare the publishable workspaces by passing the same `packages:` input to both
   pr:
     # ...
     steps:
-      - uses: danielroe/uppt/pr@3a4fd445ce266b91dd73ced7ae8140cc0f9fc19c # v0.5.2
+      - uses: danielroe/uppt/pr@5ac2919d7db1704438eaa73aedb18173841222e6 # v0.5.3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           packages: |
@@ -198,7 +198,7 @@ Declare the publishable workspaces by passing the same `packages:` input to both
   pack:
     # ...
     steps:
-      - uses: danielroe/uppt/pack@3a4fd445ce266b91dd73ced7ae8140cc0f9fc19c # v0.5.2
+      - uses: danielroe/uppt/pack@5ac2919d7db1704438eaa73aedb18173841222e6 # v0.5.3
         with:
           packages: |
             packages/*
