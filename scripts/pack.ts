@@ -22,8 +22,9 @@
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
+import { resolve } from 'node:path'
 
+import { parseFilenames } from './_pack-json.ts'
 import { resolveWorkspaces } from './_workspaces.ts'
 
 function runCapture (cmd: string, args: string[], cwd?: string): string {
@@ -34,31 +35,6 @@ function runCapture (cmd: string, args: string[], cwd?: string): string {
     maxBuffer: 16 * 1024 * 1024,
     cwd,
   })
-}
-
-// `npm pack --json` emits an array of pack records with a bare
-// `filename`; `pnpm pack --json` emits a single object whose
-// `filename` is an absolute path. Normalise both to basenames so the
-// step output matches what `actions/upload-artifact` puts in the
-// artifact (and what `publish.ts` resolves under `TARBALL_DIR`).
-function parseFilenames (stdout: string): string[] {
-  const data = JSON.parse(stdout) as unknown
-  const records = Array.isArray(data) ? data : [data]
-  const filenames: string[] = []
-  for (const entry of records) {
-    if (!entry || typeof entry !== 'object' || !('filename' in entry)) {
-      throw new Error(`Unexpected pack JSON entry without 'filename': ${JSON.stringify(entry)}`)
-    }
-    const filename = (entry as { filename: unknown }).filename
-    if (typeof filename !== 'string' || !filename.endsWith('.tgz')) {
-      throw new Error(`Unexpected pack JSON 'filename': ${JSON.stringify(filename)}`)
-    }
-    filenames.push(basename(filename))
-  }
-  if (!filenames.length) {
-    throw new Error('Pack tool produced JSON with no tarball filenames')
-  }
-  return filenames
 }
 
 function main () {
