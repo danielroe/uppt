@@ -27,6 +27,9 @@ The aim of **uppt** is to make a very simple, secure release workflow for mainta
 
 **4.** Add the following workflow to your repo in `.github/workflows/release.yml`, and you're done!
 
+> [!TIP]
+> [`@e18e/setup-publish`](https://github.com/e18e/setup-publish) can scaffold this file for you. Run `npx @e18e/setup-publish` and pick the `uppt` template (interactive prompts will ask for your package manager and the GitHub environment name; pass `--env npm` to match the trusted-publisher entry from step 1).
+
 ```yaml
 name: release
 
@@ -226,7 +229,7 @@ For `publish` to work end to end you need:
 
 - An npmjs.com trusted-publisher entry per package, pointing at the caller's `release.yml` and the `npm` environment, with the `npm stage publish` permission chip.
 - A GitHub environment named `npm` (or whichever name you put on the publish job).
-- The package must already exist on npmjs.com; `npm stage publish` cannot stage a brand-new package.
+- The package must already exist on npmjs.com; `npm stage publish` cannot stage a brand-new package. For the very first publish, [`setup-trusted-publishing`](https://github.com/ThisIsMissEm/setup-trusted-publishing) will publish a `0.0.0` stub so you can attach a trusted-publisher entry: `npx setup-trusted-publishing` (run once, from the package directory).
 
 ## Credits
 
