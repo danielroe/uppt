@@ -11,9 +11,9 @@
     "test:types": "tsgo --noEmit"
   },
   "devDependencies": {
-    "@types/node": "24.12.4",
-    "@typescript/native-preview": "7.0.0-dev.20260527.2",
+    "@types/node": "24.13.2",
+    "@typescript/native-preview": "7.0.0-dev.20260612.1",
     "vitest": "4.1.8"
   },
-  "packageManager": "pnpm@11.5.0"
+  "packageManager": "pnpm@11.6.0"
 }
