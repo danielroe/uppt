@@ -177,3 +177,23 @@ export function lockstepVersionFromWorkspaces (workspaces: Workspace[]): string 
 export function isSemver (value: string): boolean {
   return /^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(value)
 }
+
+/**
+ * Resolve the version uppt should act on, the single place both `uppt/pr`
+ * (bump source) and `uppt/release` (tag source) agree on so they can never
+ * drift apart.
+ */
+export function resolveCurrentVersion (rootDir: string, packagesInput: string): string {
+  if (packagesInput.length > 0) {
+    return lockstepVersionFromWorkspaces(resolveWorkspaces(rootDir, packagesInput))
+  }
+
+  const pkg = JSON.parse(readFileSync(resolve(rootDir, 'package.json'), 'utf8')) as RawPackageJson
+  if (pkg.version === '0.0.0' && pkg.private === true) {
+    throw new Error('Refusing to act on a private root package.json pinned to 0.0.0. This looks like a monorepo: pass the same `packages` input that `uppt/pr` uses.')
+  }
+  if (typeof pkg.version !== 'string') {
+    throw new Error('Cannot determine version: root package.json has no `version` field. Set one, or pass the `packages` input to release a monorepo.')
+  }
+  return pkg.version
+}

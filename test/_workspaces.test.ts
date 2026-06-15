@@ -8,6 +8,7 @@ import {
   isSemver,
   lockstepVersionFromWorkspaces,
   parsePackagesInput,
+  resolveCurrentVersion,
   resolveWorkspaces,
 } from '../scripts/_workspaces.ts'
 
@@ -229,5 +230,43 @@ describe('isSemver', () => {
     expect(isSemver('1.2')).toBe(false)
     expect(isSemver('v1.2.3')).toBe(false)
     expect(isSemver('not-a-version')).toBe(false)
+  })
+})
+
+describe('resolveCurrentVersion', () => {
+  it('reads the root version for a single-package repo', () => {
+    writePackage('.', { name: 'pkg', version: '1.2.3' })
+    expect(resolveCurrentVersion(tmp, '')).toBe('1.2.3')
+  })
+
+  it('derives the lockstep version from workspaces, ignoring a private 0.0.0 root', () => {
+    writePackage('.', { name: 'monorepo', version: '0.0.0', private: true })
+    writePackage('packages/a', { name: 'a', version: '0.14.2' })
+    writePackage('packages/b', { name: 'b', version: '0.14.2' })
+    expect(resolveCurrentVersion(tmp, 'packages/*')).toBe('0.14.2')
+  })
+
+  it('skips private workspaces when resolving the lockstep version', () => {
+    writePackage('.', { name: 'monorepo', version: '0.0.0', private: true })
+    writePackage('packages/a', { name: 'a', version: '0.14.2' })
+    writePackage('packages/playground', { name: 'playground', version: '0.0.0', private: true })
+    expect(resolveCurrentVersion(tmp, 'packages/*')).toBe('0.14.2')
+  })
+
+  it('refuses to act on a private 0.0.0 root with no packages input', () => {
+    writePackage('.', { name: 'monorepo', version: '0.0.0', private: true })
+    expect(() => resolveCurrentVersion(tmp, '')).toThrow(/Refusing to act.*0\.0\.0.*monorepo.*packages/s)
+  })
+
+  it('throws when workspaces disagree on a version', () => {
+    writePackage('.', { name: 'monorepo', version: '0.0.0', private: true })
+    writePackage('packages/a', { name: 'a', version: '0.14.2' })
+    writePackage('packages/b', { name: 'b', version: '0.15.0' })
+    expect(() => resolveCurrentVersion(tmp, 'packages/*')).toThrow(/do not agree on a single version/)
+  })
+
+  it('throws when the root has no version and no packages input', () => {
+    writePackage('.', { name: 'pkg' })
+    expect(() => resolveCurrentVersion(tmp, '')).toThrow(/no `version` field/)
   })
 })

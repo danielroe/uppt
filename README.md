@@ -185,13 +185,23 @@ uppt runs your package's lifecycle scripts at one specific point and skips them 
 
 uppt supports lockstep monorepos: every publishable package shares a single version, gets bumped together, lands under one `vX.Y.Z` tag, and is staged in one workflow run.
 
-Declare the publishable workspaces by passing the same `packages:` input to both `uppt/pr` and `uppt/pack`. Each line is a directory path or a glob; `!`-prefixed entries are excluded; workspaces whose `package.json` has `"private": true` are silently skipped (even when listed by an exact path), so playgrounds and example apps stay out of npm.
+Declare the publishable workspaces by passing the same `packages:` input to `uppt/pr`, `uppt/release`, and `uppt/pack`. Each line is a directory path or a glob; `!`-prefixed entries are excluded; workspaces whose `package.json` has `"private": true` are silently skipped (even when listed by an exact path), so playgrounds and example apps stay out of npm.
 
 ```yaml
   pr:
     # ...
     steps:
       - uses: danielroe/uppt/pr@4e0c42a0fd6091f59e5dfe168e69b57651e87bed # v0.5.4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          packages: |
+            packages/*
+            !packages/playground
+
+  release:
+    # ...
+    steps:
+      - uses: danielroe/uppt/release@3a4fd445ce266b91dd73ced7ae8140cc0f9fc19c # v0.5.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           packages: |
@@ -211,7 +221,7 @@ Declare the publishable workspaces by passing the same `packages:` input to both
 The lockstep version comes from the workspaces themselves: every listed package must agree on a single semver `version`, and that's the version uppt bumps from. The root `package.json#version` (if present) is only bumped when it already matches the lockstep version, so a `0.0.0` or absent root version is left untouched.
 
 > [!IMPORTANT]
-> The `packages:` value on `uppt/pr` and `uppt/pack` must match. If they diverge, the release PR and the published tarballs will cover different sets of packages.
+> The `packages:` value on `uppt/pr`, `uppt/release`, and `uppt/pack` must match. If they diverge, the release PR, the tag, and the published tarballs will cover different sets of packages (and `uppt/release` will tag the wrong version: a private `0.0.0` root with no `packages:` input would otherwise be tagged `v0.0.0`).
 
 > [!IMPORTANT]
 > If you use pnpm, every workspace you list under `packages:` must also be listed in your `pnpm-workspace.yaml`. `pnpm pack` resolves `workspace:` and `catalog:` specifiers via the workspace graph, so a directory missing from `pnpm-workspace.yaml` will produce a tarball with unresolved specifiers (or fail outright).

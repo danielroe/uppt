@@ -10,11 +10,12 @@
 //   GITHUB_REPOSITORY      "owner/repo" (set automatically inside Actions)
 //   PR_BODY                PR body, used verbatim as release notes
 //   PUBLISH_WORKFLOW       workflow filename to dispatch (default: release.yml)
+//   PACKAGES               newline-separated list of publishable workspace
+//                          dirs/globs (monorepo); omit for single-package repos
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { isSemver, resolveCurrentVersion } from './_workspaces.ts'
 
 function run (cmd: string, args: string[], opts: { env?: NodeJS.ProcessEnv } = {}) {
   execFileSync(cmd, args, { stdio: 'inherit', env: { ...process.env, ...opts.env } })
@@ -46,14 +47,13 @@ function main () {
   const repo = process.env.GITHUB_REPOSITORY
   if (!repo || !repo.includes('/')) throw new Error('GITHUB_REPOSITORY is required')
 
-  const pkgPath = resolve(process.cwd(), 'package.json')
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string }
-  // `pkg.version` flows into ref names and `gh` argv. Pin to strict semver to
+  const version = resolveCurrentVersion(process.cwd(), process.env.PACKAGES?.trim() ?? '')
+  // `version` flows into ref names and `gh` argv. Pin to strict semver to
   // rule out flag-injection (`--upload-pack=...`) and ref-confusion attacks.
-  if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(pkg.version)) {
-    throw new Error(`Refusing to tag: package.json version "${pkg.version}" is not strict semver`)
+  if (!isSemver(version)) {
+    throw new Error(`Refusing to tag: resolved version "${version}" is not strict semver`)
   }
-  const tag = `v${pkg.version}`
+  const tag = `v${version}`
   const ghEnv = { GH_TOKEN: token }
 
   if (tagExists(repo, tag, ghEnv)) {

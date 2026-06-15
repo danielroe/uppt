@@ -24,7 +24,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { makePkgFormatter } from './pkg-format.ts'
 
-import { lockstepVersionFromWorkspaces, resolveWorkspaces, type Workspace } from './_workspaces.ts'
+import { resolveCurrentVersion, resolveWorkspaces, type Workspace } from './_workspaces.ts'
 
 interface Commit {
   shortHash: string
@@ -518,12 +518,7 @@ async function main () {
   const rootPkgSource = readFileSync(rootPkgPath, 'utf8')
   const rootPkg = JSON.parse(rootPkgSource)
 
-  const currentVersion = monorepo
-    ? lockstepVersionFromWorkspaces(workspaces)
-    : rootPkg.version
-  if (typeof currentVersion !== 'string') {
-    throw new Error('Cannot determine current version: root package.json has no `version` field. Set one, or use the `packages` input to release a monorepo.')
-  }
+  const currentVersion = resolveCurrentVersion(process.cwd(), packagesInput)
 
   const bump = determineBump(commits)
   const newVersion = incVersion(currentVersion, bump)
