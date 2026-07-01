@@ -12,8 +12,8 @@
   },
   "devDependencies": {
     "@types/node": "24.13.2",
-    "@typescript/native-preview": "7.0.0-dev.20260612.1",
+    "@typescript/native-preview": "7.0.0-dev.20260701.1",
     "vitest": "4.1.8"
   },
-  "packageManager": "pnpm@11.6.0"
+  "packageManager": "pnpm@11.9.0"
 }
