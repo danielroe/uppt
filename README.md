@@ -49,7 +49,10 @@ jobs:
   # or update a draft release PR, and close any superseded release PRs
   # (e.g. `release/v1.0.1` when the bump is now `release/v1.1.0`).
   pr:
-    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: |
+      github.event_name == 'push'
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      && !github.event.repository.fork
     runs-on: ubuntu-latest
     permissions:
       contents: write       # push the `release/vX.Y.Z` branch and delete superseded ones
@@ -62,13 +65,15 @@ jobs:
   # The release PR was merged: tag the squash commit, cut a GitHub release
   # from the PR body, and dispatch the publish workflow. The `release/v`
   # head-ref guard keeps regular feature-PR merges from triggering this;
-  # the head-repo guard keeps merged fork PRs from triggering it.
+  # the head-repo guard keeps merged fork PRs from triggering it, and the
+  # `repository.fork` guard keeps forks of this repo from releasing.
   release:
     if: |
       github.event_name == 'pull_request'
       && github.event.pull_request.merged == true
       && startsWith(github.event.pull_request.head.ref, 'release/v')
       && github.event.pull_request.head.repo.full_name == github.repository
+      && !github.event.repository.fork
     runs-on: ubuntu-latest
     concurrency:
       group: release-${{ github.event.pull_request.number }}
@@ -136,6 +141,7 @@ Whenever you push to the default branch, this action parses conventional commits
 | `node-version` | `24` | Node version for the scripts. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). |
 | `checkout` | `true` | Set to `false` if the caller has already checked out with `fetch-depth: 0`. |
 | `packages` | _(unset)_ | Newline-separated list of publishable workspace directories (paths or globs, e.g. `packages/*`). When set, uppt operates in monorepo lockstep mode. See [Monorepo support](#monorepo-support). |
+| `allow-forks` | `false` | Whether to run when the repository is a fork. By default the action skips (with a notice) so forks don't open release PRs of their own. |
 
 ### Creates a release (`danielroe/uppt/release`)
 
@@ -147,6 +153,7 @@ When you merge a release PR, this subaction tags that commit, creates a GitHub R
 | `node-version` | `24` | Node version for the scripts. Needs `--experimental-strip-types` (Node 22.6+, 24+ recommended). |
 | `publish-workflow` | `release.yml` | Workflow filename to dispatch after tagging. Must declare `workflow_dispatch`. |
 | `checkout` | `true` | Set to `false` if the caller has already checked out `github.event.pull_request.merge_commit_sha`. |
+| `allow-forks` | `false` | Whether to run when the repository is a fork. By default the action skips (with a notice) so forks don't tag and publish releases of their own. |
 
 ### Packs a tarball (`danielroe/uppt/pack`)
 

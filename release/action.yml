@@ -27,20 +27,32 @@ inputs:
     description: 'Newline-separated list of publishable workspace directories, relative to the repo root. Each line is a path or glob (e.g. `packages/*`); `!`-prefixed entries are excluded; workspaces with `"private": true` are skipped. Must match the value passed to `uppt/pr`. Omit for single-package repos.'
     required: false
     default: ''
+  allow-forks:
+    description: 'Whether to run when the repository is a fork. Defaults to `false` so a fork of a repo using uppt does not tag and publish releases of its own.'
+    required: false
+    default: 'false'
 
 runs:
   using: composite
   steps:
     - name: Validate event
+      id: guard
       shell: bash
       env:
         EVENT_NAME: ${{ github.event_name }}
+        IS_FORK: ${{ github.event.repository.fork }}
+        ALLOW_FORKS: ${{ inputs.allow-forks }}
         PR_MERGED: ${{ github.event.pull_request.merged }}
         PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         BASE_REPO: ${{ github.repository }}
       run: |
         set -euo pipefail
+        if [ "$IS_FORK" = "true" ] && [ "$ALLOW_FORKS" != "true" ]; then
+          echo "::notice::danielroe/uppt/release skipped: ${GITHUB_REPOSITORY:-this repository} is a fork. Set 'allow-forks: true' to cut releases from a fork."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
         if [ "$EVENT_NAME" != "pull_request" ]; then
           echo "::error::danielroe/uppt/release only supports 'pull_request', got '$EVENT_NAME'."
           exit 1
@@ -59,7 +71,7 @@ runs:
         fi
 
     - name: Checkout
-      if: inputs.checkout == 'true'
+      if: steps.guard.outputs.skip != 'true' && inputs.checkout == 'true'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: 0
@@ -68,12 +80,14 @@ runs:
         persist-credentials: false
 
     - name: Setup Node
+      if: steps.guard.outputs.skip != 'true'
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: ${{ inputs.node-version }}
         package-manager-cache: false
 
     - name: Tag merged release PR and dispatch publish
+      if: steps.guard.outputs.skip != 'true'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
