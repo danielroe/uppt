@@ -28,7 +28,7 @@ inputs:
     required: false
     default: ''
   mode:
-    description: 'Monorepo versioning mode: `lockstep` (default; every listed package shares one version) or `independent` (each package versions on its own cadence, tagged `<name>@X.Y.Z`). Only meaningful when `packages` is set. Independent mode currently computes and logs the release plan without opening a PR.'
+    description: 'Monorepo versioning mode: `lockstep` (default; every listed package shares one version) or `independent` (each package versions on its own cadence, tagged `<name>@X.Y.Z`). Only meaningful when `packages` is set. Independent mode opens a single `release/<base>-pending` PR covering every package with unreleased changes.'
     required: false
     default: 'lockstep'
   scopes:
