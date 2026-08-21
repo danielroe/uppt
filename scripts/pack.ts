@@ -22,7 +22,7 @@
 //                    independent mode: an ordered array of
 //                    `{ name, version, dir }`. When set, exactly those
 //                    workspaces are packed, in that order, and the ref
-//                    must be a `release-YYYY-MM-DD-<sha>` coordination
+//                    must be a `release-YYYY-MM-DD` coordination
 //                    tag instead of `vX.Y.Z`.
 
 import process from 'node:process'
@@ -69,7 +69,7 @@ function main () {
   if (releases) {
     const tag = ref.startsWith('refs/tags/') ? ref.slice('refs/tags/'.length) : ''
     if (!COORDINATION_TAG_RE.test(tag)) {
-      throw new Error(`RELEASES is set, so GITHUB_REF must be a 'refs/tags/release-YYYY-MM-DD-<sha>' coordination tag, got '${ref || '<unset>'}'`)
+      throw new Error(`RELEASES is set, so GITHUB_REF must be a 'refs/tags/release-YYYY-MM-DD' coordination tag, got '${ref || '<unset>'}'`)
     }
   }
   else {

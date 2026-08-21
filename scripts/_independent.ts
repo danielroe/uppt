@@ -76,18 +76,36 @@ export function packageTag (entry: Pick<ReleaseEntry, 'name' | 'version'>): stri
   return `${entry.name}@${entry.version}`
 }
 
-export const COORDINATION_TAG_RE = /^release-\d{4}-\d{2}-\d{2}-[0-9a-f]{7,40}$/
+export const COORDINATION_TAG_RE = /^release-\d{4}-\d{2}-\d{2}(?:\.\d+)?$/
 
 /**
- * Release-bearing tag for an independent merge: `release-YYYY-MM-DD-<short-sha>`
- * (UTC date). The GitHub release attaches here so no single package's tag
- * is privileged as "the" release.
+ * Release-bearing tag for an independent merge: `release-YYYY-MM-DD` (UTC
+ * date), suffixed `.2`, `.3`, … for the second and later releases on the
+ * same day. The GitHub release attaches here so no single package's tag is
+ * privileged as "the" release.
+ *
+ * @param date UTC date the release is cut on.
+ * @param isTaken Predicate deciding whether a candidate tag already exists.
  */
-export function coordinationTag (sha: string, date: Date = new Date()): string {
-  if (!/^[0-9a-f]{40}$/.test(sha)) {
-    throw new Error(`Expected a full commit sha, got "${sha}"`)
+export function coordinationTag (date: Date = new Date(), isTaken: (tag: string) => boolean = () => false): string {
+  const base = `release-${date.toISOString().slice(0, 10)}`
+  if (!isTaken(base)) return base
+  for (let n = 2; n <= 100; n++) {
+    const candidate = `${base}.${n}`
+    if (!isTaken(candidate)) return candidate
   }
-  return `release-${date.toISOString().slice(0, 10)}-${sha.slice(0, 7)}`
+  throw new Error(`Could not find a free coordination tag: ${base} and ${base}.2…${base}.100 all exist.`)
+}
+
+/**
+ * Human-readable GitHub release title for a release set: `<name>@X.Y.Z` for
+ * a single package, otherwise the first few plus an `and N more` tail.
+ */
+export function releaseTitle (releases: ReleaseEntry[], date: Date = new Date()): string {
+  if (!releases.length) return date.toISOString().slice(0, 10)
+  const shown = releases.slice(0, 3).map(packageTag)
+  const rest = releases.length - shown.length
+  return rest > 0 ? `${shown.join(', ')} and ${rest} more` : shown.join(', ')
 }
 
 export function serialiseReleases (releases: ReleaseEntry[]): string {

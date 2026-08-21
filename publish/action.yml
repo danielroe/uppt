@@ -20,7 +20,7 @@ inputs:
     required: false
     default: ''
   releases:
-    description: 'Independent-mode publish payload: the ordered JSON array of `{ name, version, dir }` entries emitted by `uppt/release` and delivered via the workflow''s `releases` dispatch input. Never set by hand. When present, the run must be on the matching `release-YYYY-MM-DD-<sha>` coordination tag, and (when `files` is omitted) tarballs are staged in the payload''s topological order.'
+    description: 'Independent-mode publish payload: the ordered JSON array of `{ name, version, dir }` entries emitted by `uppt/release` and delivered via the workflow''s `releases` dispatch input. Never set by hand. When present, the run must be on the matching `release-YYYY-MM-DD` coordination tag, and (when `files` is omitted) tarballs are staged in the payload''s topological order.'
     required: false
     default: ''
 
@@ -42,8 +42,8 @@ runs:
             ;;
         esac
         if [ -n "${RELEASES:-}" ]; then
-          if ! printf '%s' "${GITHUB_REF:-}" | grep -Eq '^refs/tags/release-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9a-f]{7,40}$'; then
-            echo "::error::danielroe/uppt/publish got a 'releases' payload but the ref is not a 'refs/tags/release-YYYY-MM-DD-<sha>' coordination tag (got '${GITHUB_REF:-<unset>}')."
+          if ! printf '%s' "${GITHUB_REF:-}" | grep -Eq '^refs/tags/release-[0-9]{4}-[0-9]{2}-[0-9]{2}(\.[0-9]+)?$'; then
+            echo "::error::danielroe/uppt/publish got a 'releases' payload but the ref is not a 'refs/tags/release-YYYY-MM-DD' coordination tag (got '${GITHUB_REF:-<unset>}')."
             exit 1
           fi
         elif [ "${GITHUB_REF:-}" = "${GITHUB_REF#refs/tags/v}" ]; then

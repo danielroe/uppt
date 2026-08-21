@@ -7,6 +7,7 @@ import {
   deriveReleaseSet,
   expectedTarballName,
   packageTag,
+  releaseTitle,
   releasesFromEnv,
   serialiseReleases,
 } from '../scripts/_independent.ts'
@@ -91,15 +92,32 @@ describe('tag names', () => {
     expect(packageTag({ name: 'fontaine', version: '0.8.0' })).toBe('fontaine@0.8.0')
   })
 
-  it('builds the coordination tag from the UTC date and short sha', () => {
-    const sha = 'abcdef0123456789abcdef0123456789abcdef01'
-    const tag = coordinationTag(sha, new Date('2026-02-03T23:59:00Z'))
-    expect(tag).toBe('release-2026-02-03-abcdef0')
+  it('builds the coordination tag from the UTC date', () => {
+    const tag = coordinationTag(new Date('2026-02-03T23:59:00Z'))
+    expect(tag).toBe('release-2026-02-03')
     expect(tag).toMatch(COORDINATION_TAG_RE)
   })
 
-  it('refuses a non-sha input for the coordination tag', () => {
-    expect(() => coordinationTag('main')).toThrow(/full commit sha/)
+  it('increments the coordination tag for later releases the same day', () => {
+    const taken = new Set(['release-2026-02-03', 'release-2026-02-03.2'])
+    const tag = coordinationTag(new Date('2026-02-03T23:59:00Z'), t => taken.has(t))
+    expect(tag).toBe('release-2026-02-03.3')
+    expect(tag).toMatch(COORDINATION_TAG_RE)
+  })
+
+  it('gives up rather than looping forever on a saturated day', () => {
+    expect(() => coordinationTag(new Date('2026-02-03T00:00:00Z'), () => true)).toThrow(/free coordination tag/)
+  })
+
+  it('titles the release with the packages it covers', () => {
+    expect(releaseTitle([{ name: 'fontaine', version: '0.9.0', dir: '.' }])).toBe('fontaine@0.9.0')
+    expect(releaseTitle([
+      { name: 'a', version: '1.0.0', dir: 'a' },
+      { name: 'b', version: '2.0.0', dir: 'b' },
+      { name: 'c', version: '3.0.0', dir: 'c' },
+      { name: 'd', version: '4.0.0', dir: 'd' },
+    ])).toBe('a@1.0.0, b@2.0.0, c@3.0.0 and 1 more')
+    expect(releaseTitle([], new Date('2026-02-03T00:00:00Z'))).toBe('2026-02-03')
   })
 })
 

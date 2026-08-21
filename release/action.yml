@@ -28,7 +28,7 @@ inputs:
     required: false
     default: ''
   mode:
-    description: 'Monorepo versioning mode: `lockstep` (default) or `independent`. Must match the value passed to `uppt/pr`. In independent mode the action tags each released package as `<name>@X.Y.Z`, attaches the GitHub release to a `release-YYYY-MM-DD-<sha>` coordination tag, and dispatches the publish workflow with a `releases` payload input (which the caller''s workflow must declare under `workflow_dispatch`).'
+    description: 'Monorepo versioning mode: `lockstep` (default) or `independent`. Must match the value passed to `uppt/pr`. In independent mode the action tags each released package as `<name>@X.Y.Z`, attaches the GitHub release to a `release-YYYY-MM-DD` coordination tag, and dispatches the publish workflow with a `releases` payload input (which the caller''s workflow must declare under `workflow_dispatch`).'
     required: false
     default: 'lockstep'
   allow-forks:

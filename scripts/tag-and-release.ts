@@ -16,14 +16,14 @@
 //                          mode derives the release set from the tree (each
 //                          workspace's version vs its latest `<name>@X.Y.Z`
 //                          tag), fans out one tag per released package, cuts a
-//                          single release on a `release-YYYY-MM-DD-<sha>`
+//                          single release on a `release-YYYY-MM-DD`
 //                          coordination tag, and dispatches the publish
 //                          workflow with a `releases` payload input.
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
 import { isSemver, resolveCurrentVersion, resolveWorkspaces } from './_workspaces.ts'
-import { coordinationTag, deriveReleaseSet, packageTag, serialiseReleases } from './_independent.ts'
+import { coordinationTag, deriveReleaseSet, packageTag, releaseTitle, serialiseReleases } from './_independent.ts'
 
 function run (cmd: string, args: string[], opts: { env?: NodeJS.ProcessEnv } = {}) {
   execFileSync(cmd, args, { stdio: 'inherit', env: { ...process.env, ...opts.env } })
@@ -77,10 +77,11 @@ function mainIndependent (repo: string, ghEnv: NodeJS.ProcessEnv) {
   }
 
   const sha = capture('git', ['rev-parse', 'HEAD'])
-  const coordTag = coordinationTag(sha)
+  const localTags = new Set(allTags())
+  const coordTag = coordinationTag(new Date(), tag => localTags.has(tag) || tagExists(repo, tag, ghEnv))
   const tags = [...releases.map(packageTag), coordTag]
 
-  const existing = tags.filter(tag => tagExists(repo, tag, ghEnv))
+  const existing = tags.filter(tag => tag !== coordTag && tagExists(repo, tag, ghEnv))
   if (existing.length) {
     throw new Error(`Refusing to tag: ${existing.join(', ')} already exist${existing.length === 1 ? 's' : ''} on ${repo}. If this is a rerun, delete the tags (and any release) from the previous attempt first.`)
   }
@@ -101,7 +102,7 @@ function mainIndependent (repo: string, ghEnv: NodeJS.ProcessEnv) {
   }
 
   const body = process.env.PR_BODY ?? ''
-  run('gh', ['release', 'create', coordTag, '--title', coordTag, '--notes', body], { env: ghEnv })
+  run('gh', ['release', 'create', coordTag, '--title', releaseTitle(releases), '--notes', body], { env: ghEnv })
 
   const workflow = process.env.PUBLISH_WORKFLOW || 'release.yml'
   run('gh', ['workflow', 'run', workflow, '--ref', coordTag, '-f', `releases=${serialiseReleases(releases)}`], { env: ghEnv })
