@@ -31,6 +31,7 @@ import { execFileSync } from 'node:child_process'
 import { Buffer } from 'node:buffer'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { runMain } from './_cli.ts'
 import { makePkgFormatter } from './pkg-format.ts'
 
 import { buildScopeMap, parseScopesInput, resolveCurrentVersion, resolveWorkspaces, type Workspace } from './_workspaces.ts'
@@ -399,7 +400,7 @@ export function computeIndependentPlan (opts: {
       bump: release.bump,
       ownCommits: release.ownCommits,
       commits: release.ownCommits ? routed.get(release.name)! : [],
-      scopes: scopesByName.get(release.name) ?? [release.name],
+      scopes: scopesByName.get(release.name)!,
     }
   })
 
@@ -459,10 +460,8 @@ export function formatChangelog (
   return lines.join('\n').trim()
 }
 
-async function gh<T> (path: string, init: RequestInit & { requireAuth?: boolean } = {}): Promise<T> {
-  const { requireAuth, ...rest } = init
+async function gh<T> (path: string, rest: RequestInit = {}): Promise<T> {
   const token = process.env.GITHUB_TOKEN
-  if (requireAuth && !token) throw new Error('GITHUB_TOKEN is required for this call')
   const res = await fetch(`https://api.github.com${path}`, {
     ...rest,
     headers: {
@@ -475,7 +474,7 @@ async function gh<T> (path: string, init: RequestInit & { requireAuth?: boolean 
     },
   })
   if (!res.ok) {
-    throw new Error(`GitHub ${init.method || 'GET'} ${path} -> ${res.status} ${res.statusText}: ${await res.text()}`)
+    throw new Error(`GitHub ${rest.method || 'GET'} ${path} -> ${res.status} ${res.statusText}: ${await res.text()}`)
   }
   return res.json() as Promise<T>
 }
@@ -539,7 +538,6 @@ async function closeSupersededPRs (
   let seedPreamble: string | null = null
   const openReleasePRs = await gh<Array<{ number: number, body: string | null, head: { ref: string, repo: { full_name: string } | null }, base: { ref: string }, updated_at: string }>>(
     `/repos/${repo.owner}/${repo.repo}/pulls?state=open&per_page=100&base=${encodeURIComponent(baseBranch)}&head=${repo.owner}:`,
-    { requireAuth: true },
   )
   const sameRepo = `${repo.owner}/${repo.repo}`
   const stale = openReleasePRs
@@ -556,12 +554,10 @@ async function closeSupersededPRs (
     await gh(`/repos/${repo.owner}/${repo.repo}/pulls/${pr.number}`, {
       method: 'PATCH',
       body: JSON.stringify({ state: 'closed' }),
-      requireAuth: true,
     })
     try {
       await gh(`/repos/${repo.owner}/${repo.repo}/git/refs/heads/${pr.head.ref}`, {
         method: 'DELETE',
-        requireAuth: true,
       })
     }
     catch (err) {
@@ -590,7 +586,6 @@ async function upsertReleasePR (
     await gh(`/repos/${repo.owner}/${repo.repo}/pulls/${opts.currentPR.number}`, {
       method: 'PATCH',
       body: JSON.stringify({ title: opts.title, body: opts.body }),
-      requireAuth: true,
     })
     console.log(`Updated PR #${opts.currentPR.number}`)
   } else {
@@ -598,7 +593,6 @@ async function upsertReleasePR (
       `/repos/${repo.owner}/${repo.repo}/pulls`,
       {
         method: 'POST',
-        requireAuth: true,
         body: JSON.stringify({
           title: opts.title,
           head: opts.head,
@@ -646,7 +640,6 @@ async function createTree (
       `/repos/${repo.owner}/${repo.repo}/git/blobs`,
       {
         method: 'POST',
-        requireAuth: true,
         body: JSON.stringify({
           content: Buffer.from(file.content, 'utf8').toString('base64'),
           encoding: 'base64',
@@ -660,7 +653,6 @@ async function createTree (
     `/repos/${repo.owner}/${repo.repo}/git/trees`,
     {
       method: 'POST',
-      requireAuth: true,
       body: JSON.stringify({
         base_tree: baseTree,
         tree: blobs.map(b => ({ path: b.path, mode: '100644', type: 'blob', sha: b.sha })),
@@ -688,6 +680,9 @@ async function commitFilesToBranch (
   repo: { owner: string, repo: string },
   opts: { base: string, branch: string, message: string, files: FileToCommit[] },
 ): Promise<void> {
+  /* v8 ignore next 3 -- unreachable: every caller derives `files` from a
+     non-empty release plan. Kept because the ref update below moves a branch,
+     and an empty file set would move it to a commit with no changes. */
   if (!opts.files.length) {
     throw new Error('commitFilesToBranch: refusing to commit with no files')
   }
@@ -696,18 +691,15 @@ async function commitFilesToBranch (
   try {
     const branchInfo = await gh<{ commit: { sha: string } }>(
       `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.branch)}`,
-      { requireAuth: true },
     )
     parentSha = branchInfo.commit.sha
   } catch (err) {
     if (!(err instanceof Error) || !/-> 404\b/.test(err.message)) throw err
     const baseInfo = await gh<{ commit: { sha: string } }>(
       `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.base)}`,
-      { requireAuth: true },
     )
     await gh(`/repos/${repo.owner}/${repo.repo}/git/refs`, {
       method: 'POST',
-      requireAuth: true,
       body: JSON.stringify({
         ref: `refs/heads/${opts.branch}`,
         sha: baseInfo.commit.sha,
@@ -718,7 +710,6 @@ async function commitFilesToBranch (
 
   const parentCommit = await gh<{ tree: { sha: string } }>(
     `/repos/${repo.owner}/${repo.repo}/git/commits/${parentSha}`,
-    { requireAuth: true },
   )
 
   const tree = await createTree(repo, parentCommit.tree.sha, opts.files)
@@ -727,7 +718,6 @@ async function commitFilesToBranch (
     `/repos/${repo.owner}/${repo.repo}/git/commits`,
     {
       method: 'POST',
-      requireAuth: true,
       body: JSON.stringify({
         message: opts.message,
         tree,
@@ -738,7 +728,6 @@ async function commitFilesToBranch (
 
   await gh(`/repos/${repo.owner}/${repo.repo}/git/refs/heads/${opts.branch}`, {
     method: 'PATCH',
-    requireAuth: true,
     body: JSON.stringify({ sha: commit.sha }),
   })
 }
@@ -798,6 +787,9 @@ async function syncReleaseBranch (
   repo: { owner: string, repo: string },
   opts: { base: string, branch: string, message: string, files: FileToCommit[] },
 ): Promise<void> {
+  /* v8 ignore next 3 -- unreachable: `runIndependent` returns early on an
+     empty plan. Kept because the divergent path below force-updates the
+     release branch, so an empty file set would discard it. */
   if (!opts.files.length) {
     throw new Error('syncReleaseBranch: refusing to commit with no files')
   }
@@ -809,7 +801,6 @@ async function syncReleaseBranch (
   try {
     const cmp = await gh<{ files?: Array<{ filename: string }>, merge_base_commit: { sha: string }, behind_by: number }>(
       `/repos/${repo.owner}/${repo.repo}/compare/${encodeURIComponent(opts.base)}...${encodeURIComponent(opts.branch)}`,
-      { requireAuth: true },
     )
     divergence = {
       changed: new Set((cmp.files ?? []).map(file => file.filename)),
@@ -829,7 +820,6 @@ async function syncReleaseBranch (
     if (divergence.behindBy > 0) {
       const baseCmp = await gh<{ files?: Array<{ filename: string }> }>(
         `/repos/${repo.owner}/${repo.repo}/compare/${divergence.mergeBase}...${encodeURIComponent(opts.base)}`,
-        { requireAuth: true },
       )
       for (const file of baseCmp.files ?? []) {
         if (desired.has(file.filename)) baseTouched.push(file.filename)
@@ -846,12 +836,10 @@ async function syncReleaseBranch (
 
   const baseInfo = await gh<{ commit: { sha: string } }>(
     `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.base)}`,
-    { requireAuth: true },
   )
   const baseSha = baseInfo.commit.sha
   const baseCommit = await gh<{ tree: { sha: string } }>(
     `/repos/${repo.owner}/${repo.repo}/git/commits/${baseSha}`,
-    { requireAuth: true },
   )
   const tree = await createTree(repo, baseCommit.tree.sha, opts.files)
 
@@ -859,7 +847,6 @@ async function syncReleaseBranch (
     `/repos/${repo.owner}/${repo.repo}/git/commits`,
     {
       method: 'POST',
-      requireAuth: true,
       body: JSON.stringify({ message: opts.message, tree, parents: [baseSha] }),
     },
   )
@@ -867,13 +854,11 @@ async function syncReleaseBranch (
   if (divergence) {
     await gh(`/repos/${repo.owner}/${repo.repo}/git/refs/heads/${opts.branch}`, {
       method: 'PATCH',
-      requireAuth: true,
       body: JSON.stringify({ sha: commit.sha, force: true }),
     })
   } else {
     await gh(`/repos/${repo.owner}/${repo.repo}/git/refs`, {
       method: 'POST',
-      requireAuth: true,
       body: JSON.stringify({ ref: `refs/heads/${opts.branch}`, sha: commit.sha }),
     })
   }
@@ -887,7 +872,6 @@ async function getFileContent (
   try {
     const data = await gh<{ content?: string, encoding?: string }>(
       `/repos/${repo.owner}/${repo.repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(ref)}`,
-      { requireAuth: true },
     )
     if (data.encoding !== 'base64' || typeof data.content !== 'string') return null
     return Buffer.from(data.content, 'base64').toString('utf8')
@@ -1027,10 +1011,18 @@ export function buildIndependentBody (
       }), '')
     } else {
       const causes = propagationCauses(release, releasedNames)
-      const note = causes.length
-        ? `_Released because ${causes.map(c => `\`${c}\``).join(' and ')} was bumped; no direct changes._`
-        : '_Released because a `workspace:` dependency was bumped; no direct changes._'
-      lines.push(note, '')
+      /* v8 ignore start -- unreachable for a plan built by
+         `computeIndependentPlan`: a release with `ownCommits: false` exists
+         only because `propagateReleases` found a released `workspace:`
+         dependency, and `propagationCauses` re-derives that same edge with
+         the same predicate. Kept because `buildIndependentBody` is exported
+         and could be handed a plan assembled by other means. */
+      if (!causes.length) {
+        lines.push('_Released because a `workspace:` dependency was bumped; no direct changes._', '')
+        continue
+      }
+      /* v8 ignore stop */
+      lines.push(`_Released because ${causes.map(c => `\`${c}\``).join(' and ')} was bumped; no direct changes._`, '')
     }
   }
 
@@ -1060,7 +1052,7 @@ export function buildIndependentBody (
   return lines.join('\n').trimEnd()
 }
 
-async function main () {
+export async function main () {
   const dryRun = Boolean(process.env.DRY_RUN)
   const repo = getRepo()
   const baseBranch = getCurrentBranch()
@@ -1315,9 +1307,6 @@ async function runIndependent (packagesInput: string): Promise<void> {
     })
   }
 
-  const hasToken = Boolean(process.env.GITHUB_TOKEN)
-  if (!hasToken && !dryRun) throw new Error('GITHUB_TOKEN is required to create or update the PR')
-
   const ownCommits = plan.releases.flatMap(r => r.commits)
   const seen = new Set<string>()
   const uniqueCommits = ownCommits.filter(c => !seen.has(c.hash) && Boolean(seen.add(c.hash)))
@@ -1346,10 +1335,4 @@ async function runIndependent (packagesInput: string): Promise<void> {
   await upsertReleasePR(repo, { currentPR, title, head: releaseBranch, base: baseBranch, body })
 }
 
-// Run as a script, not when imported by tests.
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) => {
-    console.error(err)
-    process.exit(1)
-  })
-}
+runMain(import.meta.url, main)

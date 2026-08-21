@@ -27,6 +27,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import { runMain } from './_cli.ts'
 import { expectedTarballName, releasesFromEnv } from './_independent.ts'
 
 function run (cmd: string, args: string[]) {
@@ -53,7 +54,7 @@ function parseTarballFiles (raw: string): string[] {
   return parsed as string[]
 }
 
-function main () {
+export function main () {
   const access = process.env.NPM_ACCESS === 'restricted' ? 'restricted' : 'public'
 
   const dir = process.env.TARBALL_DIR
@@ -89,10 +90,4 @@ function main () {
   }
 }
 
-try {
-  main()
-}
-catch (err) {
-  console.error(err)
-  process.exit(1)
-}
+runMain(import.meta.url, main)

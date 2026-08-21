@@ -133,9 +133,7 @@ export function propagateReleases (
   const order = topologicalOrder(graph)
   for (const name of order) {
     if (releases.has(name)) continue
-    const deps = graph.dependencies.get(name)
-    if (!deps) continue
-    for (const dep of deps) {
+    for (const dep of graph.dependencies.get(name)!) {
       if (releases.has(dep)) {
         releases.set(name, { name, bump: 'patch', ownCommits: false })
         break

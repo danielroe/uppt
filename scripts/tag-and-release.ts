@@ -22,6 +22,7 @@
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
+import { runMain } from './_cli.ts'
 import { isSemver, resolveCurrentVersion, resolveWorkspaces } from './_workspaces.ts'
 import { coordinationTag, deriveReleaseSet, packageTag, releaseTitle, serialiseReleases } from './_independent.ts'
 import { getAllTags } from './update-changelog.ts'
@@ -106,7 +107,7 @@ function mainIndependent (repo: string, ghEnv: NodeJS.ProcessEnv) {
   console.log(`Tagged ${releases.length} package${releases.length === 1 ? '' : 's'} (${releases.map(packageTag).join(', ')}) plus ${coordTag}, created release, dispatched ${workflow}.`)
 }
 
-function main () {
+export function main () {
   const token = process.env.GITHUB_TOKEN
   if (!token) throw new Error('GITHUB_TOKEN is required')
   const repo = process.env.GITHUB_REPOSITORY
@@ -146,10 +147,4 @@ function main () {
   console.log(`Tagged ${tag}, created release, dispatched ${workflow}.`)
 }
 
-try {
-  main()
-}
-catch (err) {
-  console.error(err)
-  process.exit(1)
-}
+runMain(import.meta.url, main)

@@ -30,12 +30,13 @@ import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import { runMain } from './_cli.ts'
 import { parseFilenames } from './_pack-json.ts'
 import { resolveWorkspaces } from './_workspaces.ts'
 import { COORDINATION_TAG_RE, releasesFromEnv, type ReleaseEntry } from './_independent.ts'
 
-function runCapture (cmd: string, args: string[], cwd?: string): string {
-  console.log('$', cmd, ...args, cwd ? `(cwd: ${cwd})` : '')
+function runCapture (cmd: string, args: string[], cwd: string): string {
+  console.log('$', cmd, ...args, `(cwd: ${cwd})`)
   return execFileSync(cmd, args, {
     stdio: ['ignore', 'pipe', 'inherit'],
     encoding: 'utf8',
@@ -62,7 +63,7 @@ function releaseTargets (rootDir: string, releases: ReleaseEntry[]): Array<{ nam
   })
 }
 
-function main () {
+export function main () {
   const ref = process.env.GITHUB_REF ?? ''
   const releases = releasesFromEnv(process.env.RELEASES)
 
@@ -117,10 +118,4 @@ function main () {
   }
 }
 
-try {
-  main()
-}
-catch (err) {
-  console.error(err)
-  process.exit(1)
-}
+runMain(import.meta.url, main)

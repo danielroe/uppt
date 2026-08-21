@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { buildBumpFileSet, buildIndependentBody, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, type Commit } from '../scripts/update-changelog.ts'
+import { buildBumpFileSet, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, type Commit } from '../scripts/update-changelog.ts'
 import { resolveWorkspaces } from '../scripts/_workspaces.ts'
 
 let tmp: string
@@ -226,6 +226,24 @@ describe('buildBumpFileSet', () => {
       })
 
       expect(files.map(f => f.path)).toEqual(['packages/a/package.json'])
+    })
+
+    it('writes the root only once when it is itself a listed workspace', () => {
+      writePackage('.', { name: 'root-pkg', version: '1.2.3' })
+      const workspaces = resolveWorkspaces(tmp, '**')
+      const rootPkg = { name: 'root-pkg', version: '1.2.3' }
+
+      const files = buildBumpFileSet({
+        monorepo: true,
+        workspaces,
+        rootPkg,
+        rootPkgSource: sourceOf(rootPkg),
+        currentVersion: '1.2.3',
+        newVersion: '1.2.4',
+      })
+
+      expect(files.map(f => f.path)).toEqual(['package.json'])
+      expect(JSON.parse(files[0]!.content)).toMatchObject({ version: '1.2.4' })
     })
 
     it('preserves unrelated workspace fields', () => {
@@ -665,6 +683,65 @@ describe('independent release PR', () => {
     expect(byPath['packages/fontless/package.json']!.endsWith('\n')).toBe(true)
   })
 
+  it('throws when a planned package has no version field', () => {
+    writePackage('packages/a', { name: 'a' })
+    expect(() => computeIndependentPlan({
+      workspaces: resolveWorkspaces(tmp, 'packages/a'),
+      scopeOverrides: new Map([['a', ['a']]]),
+      tags: [],
+      commits: [commit('fix(a): thing')],
+    })).toThrow(/has no `version` field/)
+  })
+
+  it('ignores a self-referential workspace dependency when naming propagation causes', () => {
+    writePackage('packages/a', { name: 'a', version: '1.0.0' })
+    writePackage('packages/b', { name: 'b', version: '2.0.0', dependencies: { a: 'workspace:*', b: 'workspace:*' } })
+    const body = buildIndependentBody(computeIndependentPlan({
+      workspaces: resolveWorkspaces(tmp, 'packages/*'),
+      scopeOverrides: new Map(),
+      tags: ['a@1.0.0', 'b@2.0.0'],
+      commits: [commit('fix(a): thing')],
+    }), bodyOpts)
+    expect(body).toContain('_Released because `a` was bumped; no direct changes._')
+  })
+
+  it('skips dependency fields that are absent or not objects', () => {
+    writePackage('packages/a', { name: 'a', version: '1.0.0' })
+    writePackage('packages/b', {
+      name: 'b',
+      version: '2.0.0',
+      dependencies: { a: 'workspace:*', external: '^1.0.0' },
+      optionalDependencies: 'not-an-object',
+    })
+    const body = buildIndependentBody(computeIndependentPlan({
+      workspaces: resolveWorkspaces(tmp, 'packages/*'),
+      scopeOverrides: new Map(),
+      tags: ['a@1.0.0', 'b@2.0.0'],
+      commits: [commit('fix(a): thing')],
+    }), bodyOpts)
+    expect(body).toContain('_Released because `a` was bumped; no direct changes._')
+  })
+
+  it('renders a placeholder when there are no contributors at all', () => {
+    const body = buildIndependentBody(fontainePlan([commit('feat(fontaine): thing')]), {
+      ...bodyOpts,
+      contributors: [],
+    })
+    expect(body).toContain('### ❤️ Contributors\n\n_no contributors yet_')
+    expect(body).not.toContain('New Contributors')
+  })
+
+  it('bumps the root manifest when the root is itself a planned release', () => {
+    writePackage('.', { name: 'root-pkg', version: '1.0.0' })
+    const files = buildIndependentBumpFileSet(computeIndependentPlan({
+      workspaces: resolveWorkspaces(tmp, '**'),
+      scopeOverrides: new Map(),
+      tags: ['root-pkg@1.0.0'],
+      commits: [commit('fix(root-pkg): thing')],
+    }))
+    expect(files.map(f => f.path)).toEqual(['package.json'])
+  })
+
   it('bumps only the released package when nothing propagates', () => {
     writePackage('packages/a', { name: 'a', version: '1.0.0' })
     writePackage('packages/b', { name: 'b', version: '2.0.0' })
@@ -676,6 +753,47 @@ describe('independent release PR', () => {
     }))
 
     expect(files.map(f => f.path)).toEqual(['packages/a/package.json'])
+  })
+})
+
+describe('determineBump', () => {
+  function commit (overrides: Partial<Commit>): Commit {
+    return {
+      hash: 'a'.repeat(40),
+      shortHash: 'aaaaaaa',
+      message: 'chore: thing',
+      type: 'chore',
+      scope: '',
+      description: 'thing',
+      isBreaking: false,
+      author: { name: 'Test', email: 'test@example.com' },
+      references: [],
+      ...overrides,
+    }
+  }
+
+  it('bumps major for a breaking change', () => {
+    expect(determineBump([commit({}), commit({ isBreaking: true })])).toBe('major')
+  })
+
+  it('bumps minor for a feature', () => {
+    expect(determineBump([commit({ type: 'feat' })])).toBe('minor')
+  })
+
+  it('bumps patch for anything else', () => {
+    expect(determineBump([commit({ type: 'fix' })])).toBe('patch')
+  })
+
+  it('renders breaking changes with a warning marker and skips unknown types', () => {
+    const changelog = formatChangelog(
+      [
+        commit({ type: 'feat', description: 'new thing', isBreaking: true }),
+        commit({ type: 'wip', description: 'not a known type' }),
+      ],
+      { owner: 'owner', repo: 'repo', fromRef: null, toRef: 'main' },
+    )
+    expect(changelog).toContain('- ⚠️  new thing')
+    expect(changelog).not.toContain('not a known type')
   })
 })
 
@@ -718,6 +836,13 @@ describe('releaseBranchDrift', () => {
       ...inSync,
       branchContents: new Map([['packages/a/package.json', '{"version":"1.0.1"}\n']]),
     })).toBe('packages/a/package.json differs from the plan')
+  })
+
+  it('rebuilds when the branch carries no diff at all', () => {
+    expect(releaseBranchDrift({
+      ...inSync,
+      divergence: { ...inSync.divergence, changed: new Set() },
+    })).toBe('branch changes nothing, plan changes packages/a/package.json')
   })
 
   it('rebuilds when base has since touched the same manifest', () => {

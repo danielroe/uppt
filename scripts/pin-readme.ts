@@ -11,6 +11,8 @@
 import process from 'node:process'
 import { Buffer } from 'node:buffer'
 
+import { runMain } from './_cli.ts'
+
 interface GhRefResponse { object: { sha: string } }
 interface GhContentResponse { sha: string, content: string, encoding: 'base64' }
 interface GhPutResponse { commit: { sha: string, html_url: string } }
@@ -43,7 +45,7 @@ function rewrite (readme: string, sha: string, tag: string) {
   return readme.replace(pinRe, (_match, prefix: string) => `${prefix}@${sha} # ${tag}`)
 }
 
-async function main () {
+export async function main () {
   const token = process.env.GITHUB_TOKEN
   if (!token) throw new Error('GITHUB_TOKEN is required')
 
@@ -97,10 +99,6 @@ async function main () {
       console.log(`attempt ${attempt}: ${branch} advanced under us, retrying`)
       continue
     }
-    if (put.status < 200 || put.status >= 300) {
-      throw new Error(`PUT contents returned ${put.status}`)
-    }
-
     console.log(`pinned README.md to ${tag} in ${put.data.commit.html_url}`)
     return
   }
@@ -108,7 +106,4 @@ async function main () {
   throw new Error('Exhausted retries trying to update README.md')
 }
 
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+runMain(import.meta.url, main)

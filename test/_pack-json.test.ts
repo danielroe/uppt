@@ -66,6 +66,15 @@ describe('extractTrailingJson', () => {
   it('throws when stdout does not end with a JSON value', () => {
     expect(() => extractTrailingJson('[INFO] only logs here\n')).toThrow(/did not end with a JSON value/)
   })
+
+  it('falls back to an earlier candidate when the last one is not parseable on its own', () => {
+    const stdout = '{"name":"x","pack":\n{"filename":"x-1.0.0.tgz"}}\n'
+    expect(extractTrailingJson(stdout)).toEqual({ name: 'x', pack: { filename: 'x-1.0.0.tgz' } })
+  })
+
+  it('throws when nothing in stdout parses as JSON', () => {
+    expect(() => extractTrailingJson('[INFO] built}\n')).toThrow(/Could not find a JSON value/)
+  })
 })
 
 describe('parseFilenames', () => {

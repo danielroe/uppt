@@ -34,6 +34,13 @@ describe('deriveReleaseSet', () => {
     expect(set).toEqual([{ name: 'a', version: '1.1.0', dir: 'packages/a' }])
   })
 
+  it('skips workspaces with no version field', () => {
+    const versionless = { ...ws('a', '1.0.0'), version: null }
+    expect(deriveReleaseSet([versionless, ws('b', '2.1.0')], ['b@2.0.0'])).toEqual([
+      { name: 'b', version: '2.1.0', dir: 'packages/b' },
+    ])
+  })
+
   it('includes packages with no prior tag of any kind', () => {
     const set = deriveReleaseSet([ws('a', '0.1.0')], [])
     expect(set).toEqual([{ name: 'a', version: '0.1.0', dir: 'packages/a' }])
@@ -131,6 +138,11 @@ describe('releases payload', () => {
     expect(releasesFromEnv(serialiseReleases(entries))).toEqual(entries)
   })
 
+  it('accepts the repo root as a dir', () => {
+    expect(releasesFromEnv('[{"name":"a","version":"1.0.0","dir":"."}]'))
+      .toEqual([{ name: 'a', version: '1.0.0', dir: '.' }])
+  })
+
   it('returns null when absent or blank', () => {
     expect(releasesFromEnv(undefined)).toBeNull()
     expect(releasesFromEnv('')).toBeNull()
@@ -146,6 +158,7 @@ describe('releases payload', () => {
     expect(() => releasesFromEnv('[{"name":"a","version":"latest","dir":"a"}]')).toThrow(/non-semver version/)
     expect(() => releasesFromEnv('[{"name":"a","version":"1.0.0","dir":"../a"}]')).toThrow(/unsafe dir/)
     expect(() => releasesFromEnv('[{"name":"a","version":"1.0.0","dir":"/a"}]')).toThrow(/unsafe dir/)
+    expect(() => releasesFromEnv('[{"name":"a","version":"1.0.0","dir":""}]')).toThrow(/unsafe dir/)
     expect(() => releasesFromEnv('[{"name":"a","version":"1.0.0"}]')).toThrow(/unsafe dir/)
     expect(() => releasesFromEnv(JSON.stringify([entries[0], entries[0]])))
       .toThrow(/more than once/)

@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -103,7 +103,39 @@ describe('expandPackagePatterns', () => {
   })
 })
 
+describe('expandPackagePatterns edge cases', () => {
+  it('returns nothing when every pattern is a negation', () => {
+    writePackage('packages/a', { name: 'a' })
+    expect(expandPackagePatterns(tmp, ['!packages/a'])).toEqual([])
+  })
+
+  it('ignores matches that are files rather than directories', () => {
+    writeFileSync(resolve(tmp, 'packages.txt'), 'not a workspace')
+    expect(expandPackagePatterns(tmp, ['packages*'])).toEqual([])
+  })
+
+  it('ignores matches that cannot be stat-ed, such as dangling symlinks', () => {
+    symlinkSync(resolve(tmp, 'nowhere'), resolve(tmp, 'packages'))
+    expect(expandPackagePatterns(tmp, ['packages*'])).toEqual([])
+  })
+
+  it('ignores patterns that match nothing on disk', () => {
+    writePackage('packages/a', { name: 'a' })
+    expect(expandPackagePatterns(tmp, ['packages/*', 'other/*'])).toEqual([resolve(tmp, 'packages/a')])
+  })
+})
+
 describe('resolveWorkspaces', () => {
+  it('reports the repo root as "." when it has no name', () => {
+    writePackage('.', { version: '1.0.0' })
+    expect(() => resolveWorkspaces(tmp, '**')).toThrowError(/Workspace at \. has no "name" field/)
+  })
+
+  it('gives the repo root a relDir of "."', () => {
+    writePackage('.', { name: 'pkg', version: '1.0.0' })
+    expect(resolveWorkspaces(tmp, '**').map(ws => ws.relDir)).toEqual(['.'])
+  })
+
   it('returns name/version/dir for each match', () => {
     writePackage('packages/a', { name: 'a', version: '1.0.0' })
     writePackage('packages/b', { name: 'b', version: '1.0.0' })
