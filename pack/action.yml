@@ -23,6 +23,10 @@ inputs:
     description: 'Newline-separated list of publishable workspace directories, relative to the repo root. Each line is a path or glob (e.g. `packages/*`); `!`-prefixed entries are excluded; workspaces with `"private": true` are skipped. Must match the value passed to `uppt/pr`. Omit for single-package repos.'
     required: false
     default: ''
+  releases:
+    description: 'Independent-mode publish payload: the ordered JSON array of `{ name, version, dir }` entries emitted by `uppt/release` and delivered via the workflow''s `releases` dispatch input (`${{ inputs.releases }}`). Never set by hand. When present, exactly those workspaces are packed, in that order, and the run must be on the matching `release-YYYY-MM-DD-<sha>` coordination tag.'
+    required: false
+    default: ''
 
 outputs:
   files:
@@ -36,6 +40,7 @@ runs:
       shell: bash
       env:
         EVENT_NAME: ${{ github.event_name }}
+        RELEASES: ${{ inputs.releases }}
       run: |
         set -euo pipefail
         case "$EVENT_NAME" in
@@ -45,7 +50,12 @@ runs:
             exit 1
             ;;
         esac
-        if [ "${GITHUB_REF:-}" = "${GITHUB_REF#refs/tags/v}" ]; then
+        if [ -n "${RELEASES:-}" ]; then
+          if ! printf '%s' "${GITHUB_REF:-}" | grep -Eq '^refs/tags/release-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9a-f]{7,40}$'; then
+            echo "::error::danielroe/uppt/pack got a 'releases' payload but the ref is not a 'refs/tags/release-YYYY-MM-DD-<sha>' coordination tag (got '${GITHUB_REF:-<unset>}')."
+            exit 1
+          fi
+        elif [ "${GITHUB_REF:-}" = "${GITHUB_REF#refs/tags/v}" ]; then
           echo "::error::danielroe/uppt/pack expected a 'refs/tags/v*' ref, got '${GITHUB_REF:-<unset>}'."
           exit 1
         fi
@@ -104,6 +114,7 @@ runs:
       env:
         PACK_OUT_DIR: ${{ runner.temp }}/uppt-pack
         PACKAGES: ${{ inputs.packages }}
+        RELEASES: ${{ inputs.releases }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/pack.ts
 
     - name: Upload tarball artifact

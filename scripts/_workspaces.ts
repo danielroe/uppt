@@ -168,8 +168,8 @@ export function lockstepVersionFromWorkspaces (workspaces: Workspace[]): string 
     .map(ws => `  - ${ws.name}: ${ws.version ?? '<missing>'}`)
     .join('\n')
   throw new Error(
-    'Workspaces do not agree on a single version. uppt currently supports lockstep releases only: '
-    + 'every listed package must share the same semver version. Reconcile them before releasing.\n'
+    'Workspaces do not agree on a single version, which lockstep mode requires. '
+    + 'Reconcile them to a single version, or set `mode: independent` to version each package on its own cadence.\n'
     + detail,
   )
 }
@@ -196,4 +196,108 @@ export function resolveCurrentVersion (rootDir: string, packagesInput: string): 
     throw new Error('Cannot determine version: root package.json has no `version` field. Set one, or pass the `packages` input to release a monorepo.')
   }
   return pkg.version
+}
+
+/**
+ * Parse a newline-separated `scopes:` input into a map of package name
+ * → declared commit scopes. Each non-blank, non-comment line takes the
+ * shape `<package-name>: <scope> [<scope> ...]`. Whitespace is
+ * flexible; comments start with `#`.
+ *
+ * Used by `buildScopeMap` to override the default basename-derived
+ * scope for any package the maintainer wants to disambiguate or alias.
+ */
+export function parseScopesInput (raw: string): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  const lines = raw.split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.replace(/#.*$/, '').trim()
+    if (!line) continue
+    const colon = line.indexOf(':')
+    if (colon === -1) {
+      throw new Error(`\`scopes\` entry on line ${i + 1} is missing a colon. Expected "<package-name>: <scope> [<scope> ...]", got "${line}".`)
+    }
+    const name = line.slice(0, colon).trim()
+    if (!name) {
+      throw new Error(`\`scopes\` entry on line ${i + 1} has an empty package name.`)
+    }
+    const scopes = line.slice(colon + 1).split(/\s+/).filter(Boolean)
+    if (!scopes.length) {
+      throw new Error(`\`scopes\` entry for "${name}" lists no scopes. Drop the line or add at least one scope.`)
+    }
+    if (out.has(name)) {
+      throw new Error(`\`scopes\` entry for "${name}" appears more than once. Combine the scopes onto a single line.`)
+    }
+    out.set(name, scopes)
+  }
+  return out
+}
+
+/**
+ * Inverse view of the workspace→scopes mapping: given a commit scope,
+ * return the workspaces that own it. Built once per release run.
+ */
+export interface ScopeMap {
+  /** Resolve a commit scope to the workspace that owns it, or `null`. */
+  resolve (scope: string): Workspace | null
+  /** Every (workspace, declared scopes) pair, in the input workspace order. */
+  entries (): Array<{ workspace: Workspace, scopes: string[] }>
+}
+
+/**
+ * Build the bidirectional scope routing map. For each workspace, the
+ * declared scopes come from `overrides` if present, otherwise from
+ * the basename of the package name (`@nuxt/kit` -> `kit`, `nuxt` ->
+ * `nuxt`).
+ *
+ * Throws when:
+ *   - an override references a package not in `workspaces` (likely a
+ *     stale entry from a rename);
+ *   - two workspaces end up claiming the same scope (routing would be
+ *     ambiguous; the maintainer must disambiguate with overrides).
+ */
+export function buildScopeMap (
+  workspaces: Workspace[],
+  overrides: Map<string, string[]>,
+): ScopeMap {
+  const byName = new Map(workspaces.map(ws => [ws.name, ws]))
+
+  for (const name of overrides.keys()) {
+    if (!byName.has(name)) {
+      throw new Error(
+        `\`scopes\` entry references "${name}", which is not in the resolved \`packages\` list. `
+        + 'Remove the entry or add the package to `packages`.',
+      )
+    }
+  }
+
+  const perWorkspace: Array<{ workspace: Workspace, scopes: string[] }> = []
+  const inverse = new Map<string, Workspace>()
+
+  for (const ws of workspaces) {
+    const scopes = overrides.get(ws.name) ?? [defaultScopeForName(ws.name)]
+    perWorkspace.push({ workspace: ws, scopes })
+    for (const scope of scopes) {
+      const existing = inverse.get(scope)
+      if (existing && existing !== ws) {
+        throw new Error(
+          `Commit scope "${scope}" is claimed by both "${existing.name}" and "${ws.name}". `
+          + 'Disambiguate via the `scopes` input.',
+        )
+      }
+      inverse.set(scope, ws)
+    }
+  }
+
+  return {
+    resolve: scope => inverse.get(scope) ?? null,
+    entries: () => perWorkspace,
+  }
+}
+
+function defaultScopeForName (name: string): string {
+  // `@nuxt/kit` -> `kit`; `nuxt` -> `nuxt`; `@scope/foo/bar` -> `bar`
+  // (unlikely shape but handle it without crashing).
+  const slash = name.lastIndexOf('/')
+  return slash === -1 ? name : name.slice(slash + 1)
 }

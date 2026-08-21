@@ -19,6 +19,12 @@
 //   PRERELEASE         one-shot prerelease identifier (e.g. "beta", "rc",
 //                      "0"); when set, the release cuts or continues a
 //                      prerelease instead of a stable version
+//   MODE               "lockstep" (default) or "independent"; independent
+//                      mode computes a per-package release plan instead of
+//                      bumping every workspace to one shared version
+//   SCOPES             newline-separated "<package-name>: <scope> ..."
+//                      overrides for routing commit scopes to workspaces
+//                      in independent mode
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
@@ -27,9 +33,11 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { makePkgFormatter } from './pkg-format.ts'
 
-import { resolveCurrentVersion, resolveWorkspaces, type Workspace } from './_workspaces.ts'
+import { buildScopeMap, parseScopesInput, resolveCurrentVersion, resolveWorkspaces, type Workspace } from './_workspaces.ts'
+import { buildDependencyGraph, propagateReleases, type BumpLevel } from './_dependency-graph.ts'
 
-interface Commit {
+export interface Commit {
+  hash: string
   shortHash: string
   message: string
   type: string
@@ -82,7 +90,19 @@ function getCurrentBranch (): string {
   return process.env.RELEASE_BASE || git('rev-parse', '--abbrev-ref', 'HEAD')
 }
 
-interface Tag { name: string, ref: string }
+export interface Tag { name: string, ref: string }
+
+function getAllTags (): string[] {
+  try {
+    return execFileSync(
+      'git',
+      ['for-each-ref', '--sort=-creatordate', '--format=%(refname:strip=2)', 'refs/tags'],
+      { encoding: 'utf8' },
+    ).split('\n').map(s => s.trim()).filter(Boolean)
+  } catch {
+    return []
+  }
+}
 
 function getLatestTag (): Tag | null {
   // Pick the most recent semver-shaped tag by creation date. We deliberately
@@ -93,26 +113,72 @@ function getLatestTag (): Tag | null {
   // We return both the short name (for display / URLs) and the fully
   // qualified ref (`refs/tags/...`) so subsequent git calls aren't confused
   // by branches sharing the tag name.
-  try {
-    const stdout = execFileSync(
-      'git',
-      ['for-each-ref', '--sort=-creatordate', '--format=%(refname:strip=2)', 'refs/tags'],
-      { encoding: 'utf8' },
-    )
-    const name = stdout.split('\n').map(s => s.trim()).find(t => /^v?\d+\.\d+\.\d+/.test(t))
-    return name ? { name, ref: `refs/tags/${name}` } : null
-  } catch {
-    return null
+  const name = getAllTags().find(t => /^v?\d+\.\d+\.\d+/.test(t))
+  return name ? { name, ref: `refs/tags/${name}` } : null
+}
+
+// Numeric semver comparison over the `X.Y.Z` core, with a bare version
+// sorting above any suffixed one (prerelease or build metadata) at the
+// same core. Suffixes at the same core version are not further ordered;
+// tag selection only needs "highest stable wins", not full semver
+// precedence.
+function compareVersions (a: string, b: string): number {
+  const parse = (v: string) => {
+    const m = v.match(/^(\d+)\.(\d+)\.(\d+)(.*)$/)!
+    return { core: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] !== '' }
   }
+  const pa = parse(a)
+  const pb = parse(b)
+  for (let i = 0; i < 3; i++) {
+    if (pa.core[i]! !== pb.core[i]!) return pa.core[i]! - pb.core[i]!
+  }
+  return Number(pb.pre) - Number(pa.pre)
+}
+
+function highestVersionTag (tags: string[], extractVersion: (tag: string) => string | null): Tag | null {
+  let best: { name: string, version: string } | null = null
+  for (const tag of tags) {
+    const version = extractVersion(tag)
+    if (version === null) continue
+    if (!best || compareVersions(version, best.version) > 0) best = { name: tag, version }
+  }
+  return best ? { name: best.name, ref: `refs/tags/${best.name}` } : null
+}
+
+/**
+ * Latest release tag for a specific package, using the `<name>@X.Y.Z`
+ * convention (`fontaine@0.8.0`, `@nuxt/kit@5.0.0`). "Latest" means the
+ * highest version by numeric semver comparison, regardless of the order
+ * `tags` is supplied in: tag creation date can diverge from version order
+ * (retagging, backported releases, tag imports). Bare version-shaped tags
+ * (`0.2.3`) and lockstep tags (`v0.6.0`) never match a package.
+ */
+export function latestTagForPackage (pkgName: string, tags: string[]): Tag | null {
+  const escaped = pkgName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`^${escaped}@(\\d+\\.\\d+\\.\\d+(?:[-+].*)?)$`)
+  return highestVersionTag(tags, tag => tag.match(re)?.[1] ?? null)
+}
+
+/**
+ * Latest lockstep `vX.Y.Z` tag. Used as the commit-range fallback for a
+ * package with no `<name>@*` tag yet, i.e. the first independent release
+ * after a lockstep history. "Latest" is the highest version by numeric
+ * semver comparison, not list order. Bare version-shaped tags are
+ * deliberately excluded: they can't be attributed to any package or
+ * release mode.
+ */
+export function latestLockstepTag (tags: string[]): Tag | null {
+  return highestVersionTag(tags, tag => tag.match(/^v(\d+\.\d+\.\d+(?:[-+].*)?)$/)?.[1] ?? null)
 }
 
 function parseCommit (raw: string): Commit | null {
-  const [shortHash, authorName, authorEmail, subject, body] = raw.split('\x1f')
-  if (!shortHash || !subject) return null
+  const [hash, shortHash, authorName, authorEmail, subject, body] = raw.split('\x1f')
+  if (!hash || !shortHash || !subject) return null
 
   const header = subject.match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/)
   if (!header) {
     return {
+      hash,
       shortHash,
       message: subject,
       type: '',
@@ -138,6 +204,7 @@ function parseCommit (raw: string): Commit | null {
   const description = rawDescription!.replace(/\s*\(#\d+\)\s*$/, '').trim()
 
   return {
+    hash,
     shortHash,
     message: subject,
     type: type!.toLowerCase(),
@@ -153,7 +220,7 @@ function getCommitsSince (tag: Tag | null): Commit[] {
   const range = tag ? `${tag.ref}..HEAD` : 'HEAD'
   const stdout = execFileSync(
     'git',
-    ['log', range, `--pretty=format:%h%x1f%an%x1f%ae%x1f%s%x1f%b%x1e`],
+    ['log', range, `--pretty=format:%H%x1f%h%x1f%an%x1f%ae%x1f%s%x1f%b%x1e`],
     { encoding: 'utf8' },
   )
   return stdout
@@ -164,7 +231,7 @@ function getCommitsSince (tag: Tag | null): Commit[] {
     .filter((c): c is Commit => c !== null)
 }
 
-function determineBump (commits: Commit[]): 'major' | 'minor' | 'patch' {
+export function determineBump (commits: Commit[]): BumpLevel {
   if (commits.some(c => c.isBreaking)) return 'major'
   if (commits.some(c => c.type === 'feat')) return 'minor'
   return 'patch'
@@ -231,7 +298,105 @@ export function incVersion (version: string, bump: 'major' | 'minor' | 'patch', 
   return `${x}.${y}.${z}-${prerelease}.0`
 }
 
-function formatChangelog (
+export interface PackageRelease {
+  /** Package name, as declared in its `package.json`. */
+  name: string
+  /** The resolved workspace record. */
+  workspace: Workspace
+  /**
+   * The tag this package's changelog range starts from: its latest
+   * `<name>@X.Y.Z` tag, else the latest lockstep `vX.Y.Z` tag, else
+   * `null` when the repo has neither (full history).
+   */
+  fromTag: Tag | null
+  /** Version in the workspace `package.json` right now. */
+  currentVersion: string
+  /** Version this release bumps the package to. */
+  newVersion: string
+  bump: BumpLevel
+  /**
+   * `true` when the package releases on its own routed commits;
+   * `false` when it releases only because a `workspace:` dependency
+   * was bumped.
+   */
+  ownCommits: boolean
+  /** Commits routed to this package. Empty for propagated-only releases. */
+  commits: Commit[]
+}
+
+export interface IndependentReleasePlan {
+  /** Packages to release, in topological (publish) order. */
+  releases: PackageRelease[]
+  /** Commits with no scope, or a scope no package claims. They bump nothing. */
+  unrouted: Commit[]
+}
+
+/**
+ * Compute the per-package release plan for independent-versioning mode.
+ *
+ * `commits` is the union commit range covering every package's last
+ * release; `isCommitSince` narrows it per package (a commit already
+ * shipped in `fontaine@0.8.0` must not count toward fontaine again just
+ * because fontless released longer ago). When omitted, every commit
+ * counts for every package.
+ */
+export function computeIndependentPlan (opts: {
+  workspaces: Workspace[]
+  /** `scopes:` input overrides, from `parseScopesInput`. */
+  scopeOverrides: Map<string, string[]>
+  /** All tag names, sorted newest-first. */
+  tags: string[]
+  /** Commits over the union range, already filtered to release-worthy types. */
+  commits: Commit[]
+  isCommitSince?: (commit: Commit, tag: Tag) => boolean
+  prerelease?: string
+}): IndependentReleasePlan {
+  const scopeMap = buildScopeMap(opts.workspaces, opts.scopeOverrides)
+
+  const routed = new Map<string, Commit[]>(opts.workspaces.map(ws => [ws.name, []]))
+  const unrouted: Commit[] = []
+  for (const commit of opts.commits) {
+    const ws = commit.scope ? scopeMap.resolve(commit.scope) : null
+    if (ws) routed.get(ws.name)!.push(commit)
+    else unrouted.push(commit)
+  }
+
+  const lockstepTag = latestLockstepTag(opts.tags)
+  const fromTags = new Map<string, Tag | null>()
+  const planned: Array<{ name: string, bump: BumpLevel }> = []
+  for (const ws of opts.workspaces) {
+    const fromTag = latestTagForPackage(ws.name, opts.tags) ?? lockstepTag
+    fromTags.set(ws.name, fromTag)
+    const commits = (fromTag && opts.isCommitSince)
+      ? routed.get(ws.name)!.filter(c => opts.isCommitSince!(c, fromTag))
+      : routed.get(ws.name)!
+    routed.set(ws.name, commits)
+    if (commits.length) planned.push({ name: ws.name, bump: determineBump(commits) })
+  }
+
+  const graph = buildDependencyGraph(opts.workspaces)
+  const byName = new Map(opts.workspaces.map(ws => [ws.name, ws]))
+  const releases = propagateReleases(graph, planned).map((release) => {
+    const workspace = byName.get(release.name)!
+    if (!workspace.version) {
+      throw new Error(`Cannot release "${release.name}": its package.json has no \`version\` field.`)
+    }
+    return {
+      name: release.name,
+      workspace,
+      fromTag: fromTags.get(release.name)!,
+      currentVersion: workspace.version,
+      newVersion: incVersion(workspace.version, release.bump, opts.prerelease),
+      bump: release.bump,
+      ownCommits: release.ownCommits,
+      commits: release.ownCommits ? routed.get(release.name)! : [],
+    }
+  })
+
+  return { releases, unrouted }
+}
+
+export function formatChangelog (
   commits: Commit[],
   opts: { owner: string, repo: string, fromRef: Tag | null, toRef: string },
 ): string {
@@ -465,6 +630,35 @@ async function commitFilesToBranch (
   })
 }
 
+/**
+ * Point `opts.branch` at `opts.base`'s current tip, creating it if it
+ * doesn't exist. Force-updates: any previous bump commit on the branch
+ * is discarded, ready to be replaced by a fresh one.
+ */
+async function resetBranchToBase (
+  repo: { owner: string, repo: string },
+  opts: { base: string, branch: string },
+): Promise<void> {
+  const baseInfo = await gh<{ commit: { sha: string } }>(
+    `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.base)}`,
+    { requireAuth: true },
+  )
+  try {
+    await gh(`/repos/${repo.owner}/${repo.repo}/git/refs/heads/${opts.branch}`, {
+      method: 'PATCH',
+      requireAuth: true,
+      body: JSON.stringify({ sha: baseInfo.commit.sha, force: true }),
+    })
+  } catch (err) {
+    if (!(err instanceof Error) || !/-> (?:404|422)\b/.test(err.message)) throw err
+    await gh(`/repos/${repo.owner}/${repo.repo}/git/refs`, {
+      method: 'POST',
+      requireAuth: true,
+      body: JSON.stringify({ ref: `refs/heads/${opts.branch}`, sha: baseInfo.commit.sha }),
+    })
+  }
+}
+
 async function isReleaseMergeCommit (
   repo: { owner: string, repo: string },
   sha: string,
@@ -474,7 +668,7 @@ async function isReleaseMergeCommit (
     const prs = await gh<Array<{ head: { ref: string }, merged_at: string | null }>>(
       `/repos/${repo.owner}/${repo.repo}/commits/${sha}/pulls`,
     )
-    return prs.some(pr => pr.merged_at && pr.head.ref.startsWith('release/v'))
+    return prs.some(pr => pr.merged_at && (pr.head.ref.startsWith('release/v') || /^release\/.+-pending$/.test(pr.head.ref)))
   } catch {
     return false
   }
@@ -489,8 +683,7 @@ async function isReleaseMergeCommit (
  * The root is included only if its current `version` exactly matches
  * the lockstep version; otherwise it's left untouched (it might be
  * `0.0.0`, absent, or deliberately frozen, and none of those are uppt's
- * business). When independent versioning lands, this is the place that
- * decides which workspaces get a bump on a given release.
+ * business).
  */
 export function buildBumpFileSet (opts: {
   monorepo: boolean
@@ -525,6 +718,117 @@ export function buildBumpFileSet (opts: {
   return files
 }
 
+/**
+ * Build the set of `package.json` files to write in an independent-mode
+ * release commit: exactly the planned releases' manifests, each bumped
+ * to its own `newVersion`. `workspace:` specifiers are left as-is (the
+ * package manager resolves them at pack time), and the root manifest is
+ * only included if it is itself a planned release.
+ */
+export function buildIndependentBumpFileSet (plan: IndependentReleasePlan): FileToCommit[] {
+  return plan.releases.map((release) => {
+    const pkg = { ...release.workspace.pkg, version: release.newVersion }
+    const path = release.workspace.relDir === '.' ? 'package.json' : `${release.workspace.relDir}/package.json`
+    return { path, content: makePkgFormatter(release.workspace.source)(pkg) }
+  })
+}
+
+/**
+ * Maintainer-editable preamble of a release PR body: everything above
+ * the first generated `## 👉` heading. Returns `null` when the body is
+ * empty or starts with a generated heading.
+ */
+export function extractPreamble (body: string | null | undefined): string | null {
+  if (!body) return null
+  const match = body.match(/^## 👉 .*$/m)
+  const preamble = (match ? body.slice(0, match.index) : body).trim()
+  return preamble || null
+}
+
+const DEPENDENCY_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'] as const
+
+function propagationCauses (release: PackageRelease, releasedNames: Set<string>): string[] {
+  const causes = new Set<string>()
+  for (const field of DEPENDENCY_FIELDS) {
+    const deps = release.workspace.pkg[field]
+    if (!deps || typeof deps !== 'object') continue
+    for (const [dep, spec] of Object.entries(deps as Record<string, unknown>)) {
+      if (typeof spec !== 'string' || !spec.startsWith('workspace:')) continue
+      if (dep !== release.name && releasedNames.has(dep)) causes.add(dep)
+    }
+  }
+  return [...causes]
+}
+
+/**
+ * Render the full body of an independent-mode release PR from the plan.
+ * The body is regenerated wholesale on every push (only the preamble
+ * carries over), so packages that drop out of the plan disappear.
+ */
+export function buildIndependentBody (
+  plan: IndependentReleasePlan,
+  opts: {
+    owner: string
+    repo: string
+    /** Release branch name, used as the `compare` target for changelog links. */
+    branch: string
+    preamble: string
+    contributors?: Contributor[]
+  },
+): string {
+  const releasedNames = new Set(plan.releases.map(r => r.name))
+  const lines: string[] = [opts.preamble, '', '## 👉 Pending releases', '']
+
+  for (const release of plan.releases) {
+    const suffix = release.ownCommits ? '' : ', dependency bump only'
+    lines.push(`- ${release.name}: ${release.currentVersion} → ${release.newVersion} (${release.bump}${suffix})`)
+  }
+
+  lines.push('', '## 👉 Changelog', '')
+  for (const release of plan.releases) {
+    lines.push(`### ${release.name} (${release.currentVersion} → ${release.newVersion})`, '')
+    if (release.ownCommits) {
+      lines.push(formatChangelog(release.commits, {
+        owner: opts.owner,
+        repo: opts.repo,
+        fromRef: release.fromTag,
+        toRef: opts.branch,
+      }), '')
+    } else {
+      const causes = propagationCauses(release, releasedNames)
+      const note = causes.length
+        ? `_Released because ${causes.map(c => `\`${c}\``).join(' and ')} was bumped; no direct changes._`
+        : '_Released because a `workspace:` dependency was bumped; no direct changes._'
+      lines.push(note, '')
+    }
+  }
+
+  if (plan.unrouted.length) {
+    const commitUrl = (sha: string) => `https://github.com/${opts.owner}/${opts.repo}/commit/${sha}`
+    lines.push('### 🧭 Unrouted commits', '', '_These commits were not routed to any package and do not bump any version._', '')
+    for (const c of plan.unrouted) {
+      lines.push(`- ${c.message} ([\`${c.shortHash}\`](${commitUrl(c.shortHash)}))`)
+    }
+    lines.push('')
+  }
+
+  if (opts.contributors) {
+    const newContributors = opts.contributors.filter(c => c.isFirstTime)
+    if (newContributors.length) {
+      lines.push('### 🎉 New Contributors', '', newContributors.map(c => `- ${c.name} (@${c.username})`).join('\n'), '')
+    }
+    lines.push(
+      '### ❤️ Contributors',
+      '',
+      opts.contributors.length
+        ? opts.contributors.map(c => `- ${c.name} (@${c.username})`).join('\n')
+        : '_no contributors yet_',
+    )
+  }
+
+  return lines.join('\n').trimEnd()
+}
+
 async function main () {
   const dryRun = Boolean(process.env.DRY_RUN)
   const repo = getRepo()
@@ -533,6 +837,21 @@ async function main () {
   const headSha = git('rev-parse', 'HEAD')
   if (await isReleaseMergeCommit(repo, headSha)) {
     console.log(`HEAD (${headSha.slice(0, 7)}) is the merge of a release PR; skipping.`)
+    return
+  }
+
+  const packagesInput = process.env.PACKAGES?.trim() ?? ''
+  const monorepo = packagesInput.length > 0
+
+  const mode = process.env.MODE?.trim() || 'lockstep'
+  if (mode !== 'lockstep' && mode !== 'independent') {
+    throw new Error(`Invalid \`mode\` input "${mode}": expected "lockstep" or "independent".`)
+  }
+  if (mode === 'independent') {
+    if (!monorepo) {
+      throw new Error('`mode: independent` requires the `packages` input.')
+    }
+    await runIndependent(packagesInput)
     return
   }
 
@@ -547,8 +866,6 @@ async function main () {
     return
   }
 
-  const packagesInput = process.env.PACKAGES?.trim() ?? ''
-  const monorepo = packagesInput.length > 0
   const workspaces: Workspace[] = monorepo
     ? resolveWorkspaces(process.cwd(), packagesInput)
     : []
@@ -597,14 +914,14 @@ async function main () {
     const stale = openReleasePRs
       .filter(pr =>
         pr.head.repo?.full_name === sameRepo
-        && pr.head.ref.startsWith('release/v')
+        && (pr.head.ref.startsWith('release/v') || pr.head.ref === `release/${baseBranch}-pending`)
         && pr.head.ref !== releaseBranch
         && pr.base.ref === baseBranch,
       )
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     for (const pr of stale) {
       console.log(`Closing superseded release PR #${pr.number} (${pr.head.ref})`)
-      const preamble = pr.body?.replace(/## 👉 Changelog[\s\S]*$/, '').trim()
+      const preamble = extractPreamble(pr.body)
       if (preamble && !seedPreamble) seedPreamble = preamble
       await gh(`/repos/${repo.owner}/${repo.repo}/pulls/${pr.number}`, {
         method: 'PATCH',
@@ -670,7 +987,7 @@ async function main () {
     `/repos/${repo.owner}/${repo.repo}/pulls?head=${repo.owner}:${releaseBranch}&state=open`,
   )
   const currentPR = existing[0]
-  const preamble = currentPR?.body?.replace(/## 👉 Changelog[\s\S]*$/, '').trim()
+  const preamble = extractPreamble(currentPR?.body)
     || seedPreamble
     || `> v${newVersion} is the next ${bump} release.\n>\n> **Timetable**: to be announced.`
 
@@ -717,6 +1034,194 @@ async function main () {
         requireAuth: true,
         body: JSON.stringify({
           title: `v${newVersion}`,
+          head: releaseBranch,
+          base: baseBranch,
+          body,
+          draft: true,
+        }),
+      },
+    )
+    console.log(`Created PR #${created.number}: ${created.html_url}`)
+  }
+}
+
+async function runIndependent (packagesInput: string): Promise<void> {
+  const workspaces = resolveWorkspaces(process.cwd(), packagesInput)
+  const scopeOverrides = parseScopesInput(process.env.SCOPES ?? '')
+  const tags = getAllTags()
+
+  const lockstepTag = latestLockstepTag(tags)
+  const fromTags = workspaces.map(ws => latestTagForPackage(ws.name, tags) ?? lockstepTag)
+
+  // One `git log` over the union range: the oldest per-package boundary,
+  // i.e. the highest index in the newest-first tag list. Any package with
+  // no boundary at all forces full history.
+  let unionFrom: Tag | null = null
+  if (fromTags.every(t => t !== null)) {
+    let oldestIndex = -1
+    for (const tag of fromTags) {
+      const index = tags.indexOf(tag!.name)
+      if (index > oldestIndex) {
+        oldestIndex = index
+        unionFrom = tag
+      }
+    }
+  }
+
+  const commits = getCommitsSince(unionFrom).filter(
+    c => KNOWN_TYPES.has(c.type) && !(c.type === 'chore' && c.scope === 'deps'),
+  )
+
+  const sinceSets = new Map<string, Set<string>>()
+  const isCommitSince = (commit: Commit, tag: Tag): boolean => {
+    let set = sinceSets.get(tag.ref)
+    if (!set) {
+      set = new Set(git('rev-list', `${tag.ref}..HEAD`).split('\n').filter(Boolean))
+      sinceSets.set(tag.ref, set)
+    }
+    return set.has(commit.hash)
+  }
+
+  const plan = computeIndependentPlan({
+    workspaces,
+    scopeOverrides,
+    tags,
+    commits,
+    isCommitSince,
+    prerelease: process.env.PRERELEASE?.trim() || undefined,
+  })
+
+  if (plan.unrouted.length) {
+    console.log(`Unrouted commits (${plan.unrouted.length}, bump nothing):`)
+    for (const commit of plan.unrouted) {
+      console.log(`  ${commit.shortHash} ${commit.message}`)
+    }
+  }
+  if (!plan.releases.length) {
+    console.log('Independent release plan: no packages to release.')
+    return
+  }
+
+  console.log(`Independent release plan (${plan.releases.length} package${plan.releases.length === 1 ? '' : 's'}):`)
+  for (const release of plan.releases) {
+    const reason = release.ownCommits
+      ? `${release.commits.length} commit${release.commits.length === 1 ? '' : 's'}`
+      : 'dependency bump only'
+    const from = release.fromTag ? ` since ${release.fromTag.name}` : ''
+    console.log(`  ${release.name}: ${release.currentVersion} -> ${release.newVersion} (${release.bump}, ${reason}${from})`)
+  }
+
+  const dryRun = Boolean(process.env.DRY_RUN)
+  const repo = getRepo()
+  const baseBranch = getCurrentBranch()
+  const releaseBranch = `release/${baseBranch}-pending`
+  const title = `chore(release): ${plan.releases.length} package${plan.releases.length === 1 ? '' : 's'}`
+
+  console.log(`Base branch: ${baseBranch}`)
+  console.log(`Release branch: ${releaseBranch}`)
+
+  // A stale lockstep PR (`release/vX.Y.Z`) on the same base means the repo
+  // switched to independent mode with a lockstep release still open; the two
+  // would bump the same manifests to conflicting versions, so close it and
+  // lift its preamble into the pending PR.
+  let seedPreamble: string | null = null
+  if (!dryRun && process.env.GITHUB_TOKEN) {
+    const openReleasePRs = await gh<Array<{ number: number, body: string | null, head: { ref: string, repo: { full_name: string } | null }, base: { ref: string }, updated_at: string }>>(
+      `/repos/${repo.owner}/${repo.repo}/pulls?state=open&per_page=100&base=${encodeURIComponent(baseBranch)}&head=${repo.owner}:`,
+      { requireAuth: true },
+    )
+    const sameRepo = `${repo.owner}/${repo.repo}`
+    const stale = openReleasePRs
+      .filter(pr =>
+        pr.head.repo?.full_name === sameRepo
+        && pr.head.ref.startsWith('release/v')
+        && pr.base.ref === baseBranch,
+      )
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    for (const pr of stale) {
+      console.log(`Closing superseded release PR #${pr.number} (${pr.head.ref})`)
+      const preamble = extractPreamble(pr.body)
+      if (preamble && !seedPreamble) seedPreamble = preamble
+      await gh(`/repos/${repo.owner}/${repo.repo}/pulls/${pr.number}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ state: 'closed' }),
+        requireAuth: true,
+      })
+      try {
+        await gh(`/repos/${repo.owner}/${repo.repo}/git/refs/heads/${pr.head.ref}`, {
+          method: 'DELETE',
+          requireAuth: true,
+        })
+      }
+      catch (err) {
+        console.warn(`  could not delete branch ${pr.head.ref}:`, err)
+      }
+    }
+  }
+
+  if (!dryRun) {
+    if (!process.env.GITHUB_TOKEN) {
+      throw new Error('GITHUB_TOKEN is required to create the release branch')
+    }
+    // The pending branch name never changes, but the plan behind it does
+    // (packages join and drop as commits land on base). Reset the branch to
+    // the base tip and land one fresh bump commit so the branch is always
+    // exactly base + one commit, with no stale manifests left behind.
+    await resetBranchToBase(repo, { base: baseBranch, branch: releaseBranch })
+    await commitFilesToBranch(repo, {
+      base: baseBranch,
+      branch: releaseBranch,
+      message: title,
+      files: buildIndependentBumpFileSet(plan),
+    })
+  }
+
+  const hasToken = Boolean(process.env.GITHUB_TOKEN)
+  if (!hasToken && !dryRun) throw new Error('GITHUB_TOKEN is required to create or update the PR')
+
+  const ownCommits = plan.releases.flatMap(r => r.commits)
+  const seen = new Set<string>()
+  const uniqueCommits = ownCommits.filter(c => !seen.has(c.hash) && Boolean(seen.add(c.hash)))
+  const cutoff = unionFrom ? git('log', '-1', '--format=%aI', unionFrom.ref) : null
+  const contributors = await getContributors(uniqueCommits, repo, cutoff)
+
+  const existing = await gh<Array<{ number: number, body: string | null }>>(
+    `/repos/${repo.owner}/${repo.repo}/pulls?head=${repo.owner}:${releaseBranch}&state=open`,
+  )
+  const currentPR = existing[0]
+  const preamble = extractPreamble(currentPR?.body)
+    || seedPreamble
+    || `> The next independent release, covering every package with unreleased changes.\n>\n> **Timetable**: to be announced.`
+
+  const body = buildIndependentBody(plan, {
+    owner: repo.owner,
+    repo: repo.repo,
+    branch: releaseBranch,
+    preamble,
+    contributors,
+  })
+
+  if (dryRun) {
+    console.log('\n--- DRY RUN: PR body ---\n')
+    console.log(body)
+    return
+  }
+
+  if (currentPR) {
+    await gh(`/repos/${repo.owner}/${repo.repo}/pulls/${currentPR.number}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title, body }),
+      requireAuth: true,
+    })
+    console.log(`Updated PR #${currentPR.number}`)
+  } else {
+    const created = await gh<{ number: number, html_url: string }>(
+      `/repos/${repo.owner}/${repo.repo}/pulls`,
+      {
+        method: 'POST',
+        requireAuth: true,
+        body: JSON.stringify({
+          title,
           head: releaseBranch,
           base: baseBranch,
           body,

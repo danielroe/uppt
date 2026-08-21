@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { buildBumpFileSet, incVersion } from '../scripts/update-changelog.ts'
+import { buildBumpFileSet, buildIndependentBody, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, incVersion, latestLockstepTag, latestTagForPackage, type Commit } from '../scripts/update-changelog.ts'
 import { resolveWorkspaces } from '../scripts/_workspaces.ts'
 
 let tmp: string
@@ -268,5 +268,373 @@ describe('buildBumpFileSet', () => {
       expect(byPath['packages/a/package.json']).toBe('{\n\t"name": "a",\n\t"version": "1.2.4"\n}\n')
       expect(byPath['packages/b/package.json']).toBe('{\n    "name": "b",\n    "version": "1.2.4"\n}\n')
     })
+  })
+})
+
+describe('latestTagForPackage', () => {
+  const fontaineTags = [
+    'fontaine@0.8.0',
+    'fontless@0.2.1',
+    'fontaine@0.7.0',
+    'fontless@0.2.0',
+    'v0.6.0',
+    'v0.5.0',
+    '0.2.3',
+    '0.2.2',
+  ]
+
+  it('matches only the package own <name>@X.Y.Z tags', () => {
+    expect(latestTagForPackage('fontaine', fontaineTags)?.name).toBe('fontaine@0.8.0')
+    expect(latestTagForPackage('fontless', fontaineTags)?.name).toBe('fontless@0.2.1')
+  })
+
+  it('never matches bare or lockstep tags to a package', () => {
+    expect(latestTagForPackage('foo', ['0.2.3', 'v0.6.0'])).toBeNull()
+  })
+
+  it('parses scoped package names', () => {
+    const tag = latestTagForPackage('@nuxt/kit', ['@nuxt/kit@5.0.0', 'nuxt@5.0.0', 'v4.2.0'])
+    expect(tag).toEqual({ name: '@nuxt/kit@5.0.0', ref: 'refs/tags/@nuxt/kit@5.0.0' })
+  })
+
+  it('does not match a longer package name sharing a prefix', () => {
+    expect(latestTagForPackage('font', fontaineTags)).toBeNull()
+  })
+
+  it('picks the highest version even when list order contradicts it', () => {
+    expect(latestTagForPackage('fontaine', ['fontaine@0.8.0', 'fontaine@0.8.1'])?.name).toBe('fontaine@0.8.1')
+    expect(latestTagForPackage('fontaine', ['fontaine@1.0.0', 'fontaine@0.9.9'])?.name).toBe('fontaine@1.0.0')
+    expect(latestTagForPackage('fontaine', ['fontaine@0.9.9', 'fontaine@1.0.0'])?.name).toBe('fontaine@1.0.0')
+  })
+
+  it('compares version components numerically, not lexically', () => {
+    expect(latestTagForPackage('fontaine', ['fontaine@0.8.0', 'fontaine@0.8.10', 'fontaine@0.8.9'])?.name).toBe('fontaine@0.8.10')
+  })
+
+  it('sorts a stable version above its own prereleases', () => {
+    expect(latestTagForPackage('fontaine', ['fontaine@1.0.0-beta.1', 'fontaine@1.0.0'])?.name).toBe('fontaine@1.0.0')
+    expect(latestTagForPackage('fontaine', ['fontaine@1.0.0', 'fontaine@1.0.1-beta.1'])?.name).toBe('fontaine@1.0.1-beta.1')
+  })
+})
+
+describe('latestLockstepTag', () => {
+  it('finds the newest v-prefixed tag, skipping bare and per-package tags', () => {
+    const tag = latestLockstepTag(['fontaine@0.8.0', '0.2.3', 'v0.6.0', 'v0.5.0'])
+    expect(tag?.name).toBe('v0.6.0')
+  })
+
+  it('returns null when no lockstep tag exists', () => {
+    expect(latestLockstepTag(['fontaine@0.8.0', '0.2.3'])).toBeNull()
+  })
+
+  it('picks the highest version regardless of list order', () => {
+    expect(latestLockstepTag(['v0.5.0', 'v0.6.0'])?.name).toBe('v0.6.0')
+    expect(latestLockstepTag(['v0.8.9', 'v0.8.10'])?.name).toBe('v0.8.10')
+  })
+})
+
+describe('computeIndependentPlan', () => {
+  let hashCounter = 0
+  function commit (subject: string): Commit {
+    const header = subject.match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/)
+    const hash = (++hashCounter).toString(16).padStart(40, '0')
+    return {
+      hash,
+      shortHash: hash.slice(0, 7),
+      message: subject,
+      type: header?.[1]?.toLowerCase() ?? '',
+      scope: header?.[2] ?? '',
+      description: header?.[4] ?? subject,
+      isBreaking: Boolean(header?.[3]),
+      author: { name: 'Test', email: 'test@example.com' },
+      references: [],
+    }
+  }
+
+  function fontaineWorkspaces () {
+    writePackage('packages/fontaine', { name: 'fontaine', version: '0.8.0' })
+    writePackage('packages/fontless', {
+      name: 'fontless',
+      version: '0.2.1',
+      dependencies: { fontaine: 'workspace:*' },
+    })
+    return resolveWorkspaces(tmp, 'packages/*')
+  }
+
+  const fontaineTags = ['fontaine@0.8.0', 'fontless@0.2.1', 'v0.6.0', '0.2.3']
+
+  it('releases fontaine on its own commit and fontless via propagation', () => {
+    const plan = computeIndependentPlan({
+      workspaces: fontaineWorkspaces(),
+      scopeOverrides: new Map(),
+      tags: fontaineTags,
+      commits: [commit('feat(fontaine): add metric overrides')],
+    })
+
+    expect(plan.releases.map(r => r.name)).toEqual(['fontaine', 'fontless'])
+    const [fontaine, fontless] = plan.releases
+    expect(fontaine).toMatchObject({
+      currentVersion: '0.8.0',
+      newVersion: '0.8.1',
+      bump: 'minor',
+      ownCommits: true,
+      fromTag: { name: 'fontaine@0.8.0', ref: 'refs/tags/fontaine@0.8.0' },
+    })
+    expect(fontaine!.commits).toHaveLength(1)
+    expect(fontless).toMatchObject({
+      currentVersion: '0.2.1',
+      newVersion: '0.2.2',
+      bump: 'patch',
+      ownCommits: false,
+      commits: [],
+    })
+    expect(plan.unrouted).toEqual([])
+  })
+
+  it('routes unscoped and unknown-scope commits to unrouted and bumps nothing', () => {
+    const unscoped = commit('fix: something repo-wide')
+    const unknown = commit('feat(playground): shiny demo')
+    const plan = computeIndependentPlan({
+      workspaces: fontaineWorkspaces(),
+      scopeOverrides: new Map(),
+      tags: fontaineTags,
+      commits: [unscoped, unknown],
+    })
+
+    expect(plan.releases).toEqual([])
+    expect(plan.unrouted).toEqual([unscoped, unknown])
+  })
+
+  it('bumps each package from its own commits only', () => {
+    writePackage('packages/a', { name: 'a', version: '1.0.0' })
+    writePackage('packages/b', { name: 'b', version: '2.0.0' })
+    const plan = computeIndependentPlan({
+      workspaces: resolveWorkspaces(tmp, 'packages/*'),
+      scopeOverrides: new Map(),
+      tags: ['a@1.0.0', 'b@2.0.0'],
+      commits: [commit('feat(a): new thing'), commit('fix(b): small thing')],
+    })
+
+    const byName = Object.fromEntries(plan.releases.map(r => [r.name, r]))
+    expect(byName.a).toMatchObject({ newVersion: '1.1.0', bump: 'minor', ownCommits: true })
+    expect(byName.b).toMatchObject({ newVersion: '2.0.1', bump: 'patch', ownCommits: true })
+  })
+
+  it('falls back to the lockstep tag for a package with no per-package tag', () => {
+    const plan = computeIndependentPlan({
+      workspaces: fontaineWorkspaces(),
+      scopeOverrides: new Map(),
+      tags: ['fontaine@0.8.0', 'v0.6.0', '0.2.3'],
+      commits: [commit('fix(fontless): resolve fallback fonts')],
+    })
+
+    expect(plan.releases).toHaveLength(1)
+    expect(plan.releases[0]).toMatchObject({
+      name: 'fontless',
+      currentVersion: '0.2.1',
+      newVersion: '0.2.2',
+      fromTag: { name: 'v0.6.0', ref: 'refs/tags/v0.6.0' },
+    })
+  })
+
+  it('filters each package commits by its own tag boundary', () => {
+    const old = commit('feat(fontaine): already shipped in 0.8.0')
+    const fresh = commit('fix(fontless): new since fontless@0.2.1')
+    const plan = computeIndependentPlan({
+      workspaces: fontaineWorkspaces(),
+      scopeOverrides: new Map(),
+      tags: fontaineTags,
+      commits: [fresh, old],
+      isCommitSince: c => c === fresh,
+    })
+
+    expect(plan.releases.map(r => r.name)).toEqual(['fontless'])
+    expect(plan.releases[0]!.commits).toEqual([fresh])
+  })
+
+  it('honours scope overrides when routing', () => {
+    const plan = computeIndependentPlan({
+      workspaces: fontaineWorkspaces(),
+      scopeOverrides: new Map([['fontaine', ['core']]]),
+      tags: fontaineTags,
+      commits: [commit('feat(core): overridden scope'), commit('feat(fontaine): now unrouted')],
+    })
+
+    const fontaine = plan.releases.find(r => r.name === 'fontaine')
+    expect(fontaine?.commits.map(c => c.scope)).toEqual(['core'])
+    expect(plan.unrouted.map(c => c.scope)).toEqual(['fontaine'])
+  })
+
+  it('applies the prerelease identifier to every computed version', () => {
+    const plan = computeIndependentPlan({
+      workspaces: fontaineWorkspaces(),
+      scopeOverrides: new Map(),
+      tags: fontaineTags,
+      commits: [commit('feat(fontaine): big change')],
+      prerelease: 'beta',
+    })
+
+    const byName = Object.fromEntries(plan.releases.map(r => [r.name, r.newVersion]))
+    expect(byName.fontaine).toBe('0.8.1-beta.0')
+    expect(byName.fontless).toBe('0.2.2-beta.0')
+  })
+})
+
+describe('extractPreamble', () => {
+  it('returns everything above the first generated heading', () => {
+    expect(extractPreamble('> intro\n\n## 👉 Changelog\n\nstuff')).toBe('> intro')
+    expect(extractPreamble('> intro\n\n## 👉 Pending releases\n\n- a\n\n## 👉 Changelog\n\nstuff')).toBe('> intro')
+  })
+
+  it('returns null for empty bodies or bodies starting with a generated heading', () => {
+    expect(extractPreamble(null)).toBeNull()
+    expect(extractPreamble('')).toBeNull()
+    expect(extractPreamble('## 👉 Changelog\n\nstuff')).toBeNull()
+  })
+
+  it('returns the whole body when no generated heading exists', () => {
+    expect(extractPreamble('> just a note')).toBe('> just a note')
+  })
+})
+
+describe('independent release PR', () => {
+  let hashCounter = 0
+  function commit (subject: string): Commit {
+    const header = subject.match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/)
+    const hash = (++hashCounter).toString(16).padStart(40, '0')
+    return {
+      hash,
+      shortHash: hash.slice(0, 7),
+      message: subject,
+      type: header?.[1]?.toLowerCase() ?? '',
+      scope: header?.[2] ?? '',
+      description: header?.[4] ?? subject,
+      isBreaking: Boolean(header?.[3]),
+      author: { name: 'Test', email: 'test@example.com' },
+      references: [],
+    }
+  }
+
+  function fontaineWorkspaces () {
+    writePackage('packages/fontaine', { name: 'fontaine', version: '0.8.0' }, { indent: '\t', trailingNewline: '\n' })
+    writePackage('packages/fontless', {
+      name: 'fontless',
+      version: '0.2.1',
+      dependencies: { fontaine: 'workspace:*' },
+    }, { trailingNewline: '\n' })
+    writePackage('.', { name: 'root', private: true, version: '0.0.0' })
+    return resolveWorkspaces(tmp, 'packages/*')
+  }
+
+  const fontaineTags = ['fontaine@0.8.0', 'fontless@0.2.1']
+  const bodyOpts = { owner: 'unjs', repo: 'fontaine', branch: 'release/main-pending', preamble: '> intro' }
+
+  function fontainePlan (commits: Commit[]) {
+    return computeIndependentPlan({
+      workspaces: fontaineWorkspaces(),
+      scopeOverrides: new Map(),
+      tags: fontaineTags,
+      commits,
+    })
+  }
+
+  it('renders one changelog section per released package, in publish order', () => {
+    const body = buildIndependentBody(fontainePlan([commit('feat(fontaine): add metric overrides')]), bodyOpts)
+
+    const fontaineIndex = body.indexOf('### fontaine (0.8.0 → 0.8.1)')
+    const fontlessIndex = body.indexOf('### fontless (0.2.1 → 0.2.2)')
+    expect(fontaineIndex).toBeGreaterThan(-1)
+    expect(fontlessIndex).toBeGreaterThan(fontaineIndex)
+    expect(body).toContain('- fontaine: 0.8.0 → 0.8.1 (minor)')
+    expect(body).toContain('- fontless: 0.2.1 → 0.2.2 (patch, dependency bump only)')
+    expect(body).toContain('add metric overrides')
+  })
+
+  it('notes the propagation cause for dependency-only releases', () => {
+    const body = buildIndependentBody(fontainePlan([commit('feat(fontaine): add metric overrides')]), bodyOpts)
+
+    expect(body).toContain('_Released because `fontaine` was bumped; no direct changes._')
+    expect(body).not.toMatch(/### fontless[\s\S]*compare changes/)
+  })
+
+  it('renders unrouted commits in their own section', () => {
+    const plan = fontainePlan([commit('feat(fontaine): thing'), commit('docs: update readme')])
+    const body = buildIndependentBody(plan, bodyOpts)
+
+    expect(body).toContain('### 🧭 Unrouted commits')
+    expect(body).toContain('not routed to any package')
+    expect(body).toContain('docs: update readme')
+  })
+
+  it('omits the unrouted section when every commit is routed', () => {
+    const body = buildIndependentBody(fontainePlan([commit('feat(fontaine): thing')]), bodyOpts)
+    expect(body).not.toContain('Unrouted commits')
+  })
+
+  it('preserves the preamble across regenerations', () => {
+    const plan = fontainePlan([commit('feat(fontaine): thing')])
+    const first = buildIndependentBody(plan, { ...bodyOpts, preamble: '> hand-written notes' })
+    const second = buildIndependentBody(plan, { ...bodyOpts, preamble: extractPreamble(first)! })
+    expect(second).toBe(first)
+  })
+
+  it('shrinks when a package drops out of the plan', () => {
+    const workspaces = fontaineWorkspaces()
+    const full = buildIndependentBody(computeIndependentPlan({
+      workspaces,
+      scopeOverrides: new Map(),
+      tags: fontaineTags,
+      commits: [commit('feat(fontaine): thing')],
+    }), bodyOpts)
+    const shrunk = buildIndependentBody(computeIndependentPlan({
+      workspaces,
+      scopeOverrides: new Map(),
+      tags: fontaineTags,
+      commits: [commit('fix(fontless): only fontless now')],
+    }), bodyOpts)
+
+    expect(full).toContain('### fontaine')
+    expect(shrunk).not.toContain('### fontaine')
+    expect(shrunk).toContain('### fontless (0.2.1 → 0.2.2)')
+  })
+
+  it('renders the contributor sections when contributors are provided', () => {
+    const body = buildIndependentBody(fontainePlan([commit('feat(fontaine): thing')]), {
+      ...bodyOpts,
+      contributors: [
+        { name: 'Ada', username: 'ada', isFirstTime: true },
+        { name: 'Grace', username: 'grace', isFirstTime: false },
+      ],
+    })
+
+    expect(body).toContain('### 🎉 New Contributors\n\n- Ada (@ada)')
+    expect(body).toContain('### ❤️ Contributors\n\n- Ada (@ada)\n- Grace (@grace)')
+  })
+
+  it('commits exactly the released manifests, preserving formatting and skipping the root', () => {
+    const files = buildIndependentBumpFileSet(fontainePlan([commit('feat(fontaine): thing')]))
+
+    expect(files.map(f => f.path).sort()).toEqual(['packages/fontaine/package.json', 'packages/fontless/package.json'])
+    const byPath = Object.fromEntries(files.map(f => [f.path, f.content]))
+    expect(byPath['packages/fontaine/package.json']).toBe('{\n\t"name": "fontaine",\n\t"version": "0.8.1"\n}\n')
+    expect(JSON.parse(byPath['packages/fontless/package.json']!)).toEqual({
+      name: 'fontless',
+      version: '0.2.2',
+      dependencies: { fontaine: 'workspace:*' },
+    })
+    expect(byPath['packages/fontless/package.json']!.endsWith('\n')).toBe(true)
+  })
+
+  it('bumps only the released package when nothing propagates', () => {
+    writePackage('packages/a', { name: 'a', version: '1.0.0' })
+    writePackage('packages/b', { name: 'b', version: '2.0.0' })
+    const files = buildIndependentBumpFileSet(computeIndependentPlan({
+      workspaces: resolveWorkspaces(tmp, 'packages/*'),
+      scopeOverrides: new Map(),
+      tags: ['a@1.0.0', 'b@2.0.0'],
+      commits: [commit('fix(a): thing')],
+    }))
+
+    expect(files.map(f => f.path)).toEqual(['packages/a/package.json'])
   })
 })

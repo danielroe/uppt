@@ -27,6 +27,10 @@ inputs:
     description: 'Newline-separated list of publishable workspace directories, relative to the repo root. Each line is a path or glob (e.g. `packages/*`); `!`-prefixed entries are excluded; workspaces with `"private": true` are skipped. Must match the value passed to `uppt/pr`. Omit for single-package repos.'
     required: false
     default: ''
+  mode:
+    description: 'Monorepo versioning mode: `lockstep` (default) or `independent`. Must match the value passed to `uppt/pr`. In independent mode the action tags each released package as `<name>@X.Y.Z`, attaches the GitHub release to a `release-YYYY-MM-DD-<sha>` coordination tag, and dispatches the publish workflow with a `releases` payload input (which the caller''s workflow must declare under `workflow_dispatch`).'
+    required: false
+    default: 'lockstep'
   allow-forks:
     description: 'Whether to run when the repository is a fork. Defaults to `false` so a fork of a repo using uppt does not tag and publish releases of its own.'
     required: false
@@ -43,6 +47,7 @@ runs:
         IS_FORK: ${{ github.event.repository.fork }}
         ALLOW_FORKS: ${{ inputs.allow-forks }}
         PR_MERGED: ${{ github.event.pull_request.merged }}
+        MODE: ${{ inputs.mode }}
         PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         BASE_REPO: ${{ github.repository }}
@@ -61,10 +66,19 @@ runs:
           echo "::error::danielroe/uppt/release requires the PR to be merged."
           exit 1
         fi
-        if [ "${PR_HEAD_REF#release/v}" = "$PR_HEAD_REF" ]; then
-          echo "::error::danielroe/uppt/release expected a 'release/v*' head ref, got '$PR_HEAD_REF'."
-          exit 1
-        fi
+        case "$PR_HEAD_REF" in
+          release/v*) ;;
+          release/*-pending)
+            if [ "$MODE" != "independent" ]; then
+              echo "::error::danielroe/uppt/release got the independent-mode head ref '$PR_HEAD_REF' but 'mode' is not 'independent'."
+              exit 1
+            fi
+            ;;
+          *)
+            echo "::error::danielroe/uppt/release expected a 'release/v*' or 'release/*-pending' head ref, got '$PR_HEAD_REF'."
+            exit 1
+            ;;
+        esac
         if [ "$PR_HEAD_REPO" != "$BASE_REPO" ]; then
           echo "::error::danielroe/uppt/release requires the release PR to originate from this repository (got '$PR_HEAD_REPO', expected '$BASE_REPO'). Add 'github.event.pull_request.head.repo.full_name == github.repository' to the release job's if: condition to skip fork PRs at the workflow level."
           exit 1
@@ -94,4 +108,5 @@ runs:
         PR_BODY: ${{ github.event.pull_request.body }}
         PUBLISH_WORKFLOW: ${{ inputs.publish-workflow }}
         PACKAGES: ${{ inputs.packages }}
+        MODE: ${{ inputs.mode }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/tag-and-release.ts

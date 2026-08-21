@@ -4,10 +4,12 @@ import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  buildScopeMap,
   expandPackagePatterns,
   isSemver,
   lockstepVersionFromWorkspaces,
   parsePackagesInput,
+  parseScopesInput,
   resolveCurrentVersion,
   resolveWorkspaces,
 } from '../scripts/_workspaces.ts'
@@ -268,5 +270,108 @@ describe('resolveCurrentVersion', () => {
   it('throws when the root has no version and no packages input', () => {
     writePackage('.', { name: 'pkg' })
     expect(() => resolveCurrentVersion(tmp, '')).toThrow(/no `version` field/)
+  })
+})
+
+describe('parseScopesInput', () => {
+  it('parses one package per line', () => {
+    const map = parseScopesInput('@nuxt/kit: kit\n@nuxt/schema: schema')
+    expect(map.get('@nuxt/kit')).toEqual(['kit'])
+    expect(map.get('@nuxt/schema')).toEqual(['schema'])
+  })
+
+  it('parses multiple scopes per package', () => {
+    const map = parseScopesInput('@nuxt/kit: kit nuxt-kit')
+    expect(map.get('@nuxt/kit')).toEqual(['kit', 'nuxt-kit'])
+  })
+
+  it('ignores comments and blank lines', () => {
+    const input = `
+      # routing for the nuxt org
+      @nuxt/kit: kit
+
+      @nuxt/schema: schema  # canonical scope
+    `
+    const map = parseScopesInput(input)
+    expect([...map.keys()]).toEqual(['@nuxt/kit', '@nuxt/schema'])
+  })
+
+  it('throws when a line is missing a colon', () => {
+    expect(() => parseScopesInput('@nuxt/kit kit')).toThrowError(/missing a colon/)
+  })
+
+  it('throws when the package name is empty', () => {
+    expect(() => parseScopesInput(': kit')).toThrowError(/empty package name/)
+  })
+
+  it('throws when no scopes are listed', () => {
+    expect(() => parseScopesInput('@nuxt/kit:')).toThrowError(/lists no scopes/)
+  })
+
+  it('throws when the same package is listed twice', () => {
+    expect(() => parseScopesInput('@nuxt/kit: kit\n@nuxt/kit: nuxt-kit'))
+      .toThrowError(/appears more than once/)
+  })
+})
+
+describe('buildScopeMap', () => {
+  it('auto-detects scopes from the basename of the package name', () => {
+    writePackage('packages/kit', { name: '@nuxt/kit', version: '1.0.0' })
+    writePackage('packages/nuxt', { name: 'nuxt', version: '1.0.0' })
+    const workspaces = resolveWorkspaces(tmp, 'packages/*')
+
+    const map = buildScopeMap(workspaces, new Map())
+    expect(map.resolve('kit')?.name).toBe('@nuxt/kit')
+    expect(map.resolve('nuxt')?.name).toBe('nuxt')
+    expect(map.resolve('schema')).toBeNull()
+  })
+
+  it('honours overrides over auto-detect', () => {
+    writePackage('packages/kit', { name: '@nuxt/kit', version: '1.0.0' })
+    const workspaces = resolveWorkspaces(tmp, 'packages/kit')
+
+    const map = buildScopeMap(workspaces, new Map([['@nuxt/kit', ['kit', 'nuxt-kit']]]))
+    expect(map.resolve('kit')?.name).toBe('@nuxt/kit')
+    expect(map.resolve('nuxt-kit')?.name).toBe('@nuxt/kit')
+  })
+
+  it('throws when an override references an unknown package', () => {
+    writePackage('packages/kit', { name: '@nuxt/kit', version: '1.0.0' })
+    const workspaces = resolveWorkspaces(tmp, 'packages/kit')
+
+    expect(() => buildScopeMap(workspaces, new Map([['@nuxt/gone', ['gone']]])))
+      .toThrowError(/references "@nuxt\/gone"/)
+  })
+
+  it('throws when two workspaces claim the same scope via auto-detect', () => {
+    writePackage('packages/a-utils', { name: '@orgA/utils', version: '1.0.0' })
+    writePackage('packages/b-utils', { name: '@orgB/utils', version: '1.0.0' })
+    const workspaces = resolveWorkspaces(tmp, 'packages/*')
+
+    expect(() => buildScopeMap(workspaces, new Map()))
+      .toThrowError(/"utils" is claimed by both "@orgA\/utils" and "@orgB\/utils"/)
+  })
+
+  it('throws when two workspaces claim the same scope via overrides', () => {
+    writePackage('packages/a', { name: '@x/a', version: '1.0.0' })
+    writePackage('packages/b', { name: '@x/b', version: '1.0.0' })
+    const workspaces = resolveWorkspaces(tmp, 'packages/*')
+
+    expect(() => buildScopeMap(workspaces, new Map([
+      ['@x/a', ['shared']],
+      ['@x/b', ['shared']],
+    ]))).toThrowError(/"shared" is claimed by both/)
+  })
+
+  it('exposes entries in workspace order', () => {
+    writePackage('packages/a', { name: '@x/a', version: '1.0.0' })
+    writePackage('packages/b', { name: '@x/b', version: '1.0.0' })
+    const workspaces = resolveWorkspaces(tmp, 'packages/*')
+
+    const map = buildScopeMap(workspaces, new Map([['@x/a', ['alpha', 'a']]]))
+    expect(map.entries()).toEqual([
+      { workspace: workspaces[0], scopes: ['alpha', 'a'] },
+      { workspace: workspaces[1], scopes: ['b'] },
+    ])
   })
 })

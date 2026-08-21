@@ -17,11 +17,17 @@
 //   NPM_ACCESS      `public` (default) or `restricted`
 //   TARBALL_DIR     directory holding the prebuilt `*.tgz` files
 //   TARBALL_FILES   optional JSON array of filenames within TARBALL_DIR
+//   RELEASES        optional JSON payload emitted by `uppt/release` in
+//                   independent mode: an array of
+//                   `{ name, version, dir }`. Names the tarballs to
+//                   stage when TARBALL_FILES is absent.
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
+
+import { expectedTarballName, releasesFromEnv } from './_independent.ts'
 
 function run (cmd: string, args: string[]) {
   console.log('$', cmd, ...args)
@@ -54,6 +60,8 @@ function main () {
   if (!dir) throw new Error('TARBALL_DIR is required')
   if (!existsSync(dir)) throw new Error(`TARBALL_DIR does not exist: ${dir}`)
 
+  const releases = releasesFromEnv(process.env.RELEASES)
+
   const filesEnv = process.env.TARBALL_FILES?.trim()
   let tarballs: string[]
   if (filesEnv) {
@@ -61,6 +69,9 @@ function main () {
     if (!tarballs.length) {
       throw new Error('TARBALL_FILES was provided but is empty')
     }
+  }
+  else if (releases) {
+    tarballs = releases.map(entry => expectedTarballName(entry.name, entry.version))
   }
   else {
     tarballs = readdirSync(dir).filter(f => f.endsWith('.tgz')).sort()

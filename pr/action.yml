@@ -27,6 +27,14 @@ inputs:
     description: 'Newline-separated list of publishable workspace directories, relative to the repo root. Each line is a path or glob (e.g. `packages/*`); `!`-prefixed entries are excluded; workspaces with `"private": true` are skipped. Omit for single-package repos.'
     required: false
     default: ''
+  mode:
+    description: 'Monorepo versioning mode: `lockstep` (default; every listed package shares one version) or `independent` (each package versions on its own cadence, tagged `<name>@X.Y.Z`). Only meaningful when `packages` is set. Independent mode currently computes and logs the release plan without opening a PR.'
+    required: false
+    default: 'lockstep'
+  scopes:
+    description: 'Optional commit-scope overrides for `independent` mode, one per line as `<package-name>: <scope> [<scope> ...]`. By default a package claims the basename of its name (`@nuxt/kit` claims `kit`), so overrides are only needed to add aliases or to disambiguate two packages that would otherwise claim the same scope.'
+    required: false
+    default: ''
   prerelease:
     description: 'One-shot prerelease identifier (e.g. `beta`, `rc`, or a bare number like `0`). When set, this run cuts or continues a prerelease: from a stable version the normal bump is applied and the identifier attached at counter 0 (`4.5.2` → `5.0.0-beta.0`); from a prerelease with the same identifier the counter increments (`5.0.0-beta.0` → `5.0.0-beta.1`). Omit for normal releases; a prerelease version with this unset graduates to its stable version.'
     required: false
@@ -81,4 +89,6 @@ runs:
         RELEASE_BASE: ${{ inputs.base-branch }}
         PACKAGES: ${{ inputs.packages }}
         PRERELEASE: ${{ inputs.prerelease }}
+        MODE: ${{ inputs.mode }}
+        SCOPES: ${{ inputs.scopes }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/update-changelog.ts
