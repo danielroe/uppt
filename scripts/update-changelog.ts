@@ -907,14 +907,8 @@ export function buildIndependentBody (
   },
 ): string {
   const releasedNames = new Set(plan.releases.map(r => r.name))
-  const lines: string[] = [opts.preamble, '', '## 👉 Pending releases', '']
+  const lines: string[] = [opts.preamble, '', '## 👉 Changelog', '']
 
-  for (const release of plan.releases) {
-    const suffix = release.ownCommits ? '' : ', dependency bump only'
-    lines.push(`- ${release.name}: ${release.currentVersion} → ${release.newVersion} (${release.bump}${suffix})`)
-  }
-
-  lines.push('', '## 👉 Changelog', '')
   for (const release of plan.releases) {
     lines.push(`### ${release.name} (${release.currentVersion} → ${release.newVersion})`, '')
     if (release.ownCommits) {

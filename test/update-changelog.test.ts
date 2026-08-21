@@ -545,8 +545,6 @@ describe('independent release PR', () => {
     const fontlessIndex = body.indexOf('### fontless (0.2.1 → 0.2.2)')
     expect(fontaineIndex).toBeGreaterThan(-1)
     expect(fontlessIndex).toBeGreaterThan(fontaineIndex)
-    expect(body).toContain('- fontaine: 0.8.0 → 0.8.1 (minor)')
-    expect(body).toContain('- fontless: 0.2.1 → 0.2.2 (patch, dependency bump only)')
     expect(body).toContain('add metric overrides')
   })
 
