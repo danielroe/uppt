@@ -10,8 +10,8 @@ The aim of **uppt** is a simple, secure release workflow that doesn't require to
 
    The package must already exist on npm; for a brand-new package, `npx setup-trusted-publishing` ([docs](https://github.com/ThisIsMissEm/setup-trusted-publishing)) publishes a `0.0.0` stub you can attach the entry to.
 
-   > [!NOTE]
-   > [Staged publishing](https://docs.npmjs.com/staged-publishing/) means you approve each publish (with 2FA) before it goes live. It's also recommended to set "Require two-factor authentication and disallow tokens."
+> [!NOTE]
+> [Staged publishing](https://docs.npmjs.com/staged-publishing/) means you approve each publish (with 2FA) before it goes live. It's also recommended to set "Require two-factor authentication and disallow tokens."
 
    <details>
    <summary>Screenshot</summary>
@@ -31,8 +31,8 @@ The aim of **uppt** is a simple, secure release workflow that doesn't require to
 
 4. **Add the workflow** below as `.github/workflows/release.yml`, and you're done!
 
-   > [!TIP]
-   > [`@e18e/setup-publish`](https://github.com/e18e/setup-publish) can scaffold this file: run `npx @e18e/setup-publish` and pick the `uppt` template (pass `--env npm` to match step 1).
+> [!TIP]
+> [`@e18e/setup-publish`](https://github.com/e18e/setup-publish) can scaffold this file: run `npx @e18e/setup-publish` and pick the `uppt` template (pass `--env npm` to match step 1).
 
 ```yaml
 name: release
