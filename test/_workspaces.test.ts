@@ -363,6 +363,18 @@ describe('buildScopeMap', () => {
     ]))).toThrowError(/"shared" is claimed by both/)
   })
 
+  it('resolves comma-separated scopes to every named workspace', () => {
+    writePackage('packages/a', { name: '@x/a', version: '1.0.0' })
+    writePackage('packages/b', { name: '@x/b', version: '1.0.0' })
+    const workspaces = resolveWorkspaces(tmp, 'packages/*')
+
+    const map = buildScopeMap(workspaces, new Map())
+    expect(map.resolveAll('a, b')).toEqual(workspaces)
+    expect(map.resolveAll('a,a')).toEqual([workspaces[0]])
+    expect(map.resolveAll('a,docs')).toEqual([workspaces[0]])
+    expect(map.resolveAll('docs')).toEqual([])
+  })
+
   it('exposes entries in workspace order', () => {
     writePackage('packages/a', { name: '@x/a', version: '1.0.0' })
     writePackage('packages/b', { name: '@x/b', version: '1.0.0' })

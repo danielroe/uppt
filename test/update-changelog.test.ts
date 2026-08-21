@@ -555,13 +555,20 @@ describe('independent release PR', () => {
     expect(body).not.toContain('**fontaine:**')
   })
 
-  it('keeps the full scope list for multi-package commits', () => {
-    const changelog = formatChangelog(
-      [commit('fix(fontaine,fontless): shared fix')],
-      { owner: 'unjs', repo: 'fontaine', fromRef: null, toRef: 'main', packageScopes: ['fontaine'] },
-    )
+  it('routes a comma-separated scope to every named package, keeping the full scope list', () => {
+    const plan = fontainePlan([commit('fix(fontaine,fontless): shared fix')])
+    const body = buildIndependentBody(plan, bodyOpts)
 
-    expect(changelog).toContain('**fontaine,fontless:** shared fix')
+    expect(plan.unrouted).toHaveLength(0)
+    expect(plan.releases.map(r => `${r.name}@${r.newVersion}`)).toEqual(['fontaine@0.8.1', 'fontless@0.2.2'])
+    expect(body.match(/\*\*fontaine,fontless:\*\* shared fix/g)).toHaveLength(2)
+  })
+
+  it('ignores unknown scopes alongside a known one', () => {
+    const plan = fontainePlan([commit('fix(fontaine,docs): partly known')])
+
+    expect(plan.unrouted).toHaveLength(0)
+    expect(plan.releases.find(r => r.name === 'fontaine')?.commits).toHaveLength(1)
   })
 
   it('keeps a scope the section does not own, and renders unscoped commits unchanged', () => {

@@ -280,7 +280,9 @@ Which package a commit belongs to comes from its conventional-commit scope. By d
             @nuxt/schema: schema
 ```
 
-Commits with no scope, or a scope that doesn't match a package (`docs:`, `feat(playground):`), don't bump anything.
+A comma-separated scope routes to every package it names, so `fix(fontaine,fontless):` bumps both and appears in both changelog sections. Commits with no scope, or a scope that doesn't match a package (`docs:`, `feat(playground):`), don't bump anything.
+
+Within a package's changelog section the scope is dropped when it names only that package: the heading already says which package it is. Multi-package scopes keep their full list.
 
 Bumping a package also releases anything that depends on it. (Only `dependencies`, `peerDependencies` and `optionalDependencies` count.)
 

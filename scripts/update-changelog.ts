@@ -358,9 +358,9 @@ export function computeIndependentPlan (opts: {
   const routed = new Map<string, Commit[]>(opts.workspaces.map(ws => [ws.name, []]))
   const unrouted: Commit[] = []
   for (const commit of opts.commits) {
-    const ws = commit.scope ? scopeMap.resolve(commit.scope) : null
-    if (ws) routed.get(ws.name)!.push(commit)
-    else unrouted.push(commit)
+    const matched = commit.scope ? scopeMap.resolveAll(commit.scope) : []
+    if (!matched.length) unrouted.push(commit)
+    for (const ws of matched) routed.get(ws.name)!.push(commit)
   }
 
   const lockstepTag = latestLockstepTag(opts.tags)

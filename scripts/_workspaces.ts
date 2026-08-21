@@ -240,6 +240,13 @@ export function parseScopesInput (raw: string): Map<string, string[]> {
 export interface ScopeMap {
   /** Resolve a commit scope to the workspace that owns it, or `null`. */
   resolve (scope: string): Workspace | null
+  /**
+   * Resolve a raw commit scope string, which may list several
+   * comma-separated scopes (`fontaine,fontless`), to every workspace it
+   * routes to. Unknown scopes are ignored; the result is deduplicated and
+   * empty when nothing matches.
+   */
+  resolveAll (scope: string): Workspace[]
   /** Every (workspace, declared scopes) pair, in the input workspace order. */
   entries (): Array<{ workspace: Workspace, scopes: string[] }>
 }
@@ -291,6 +298,14 @@ export function buildScopeMap (
 
   return {
     resolve: scope => inverse.get(scope) ?? null,
+    resolveAll: (scope) => {
+      const matched = new Set<Workspace>()
+      for (const part of scope.split(',')) {
+        const ws = inverse.get(part.trim())
+        if (ws) matched.add(ws)
+      }
+      return [...matched]
+    },
     entries: () => perWorkspace,
   }
 }
