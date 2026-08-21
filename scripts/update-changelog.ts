@@ -805,7 +805,7 @@ export function buildIndependentBody (
 
   if (plan.unrouted.length) {
     const commitUrl = (sha: string) => `https://github.com/${opts.owner}/${opts.repo}/commit/${sha}`
-    lines.push('### 🧭 Unrouted commits', '', '_These commits were not routed to any package and do not bump any version._', '')
+    lines.push('### 📝 Other commits', '', '_These commits were not routed to any package and do not bump any version._', '')
     for (const c of plan.unrouted) {
       lines.push(`- ${c.message} ([\`${c.shortHash}\`](${commitUrl(c.shortHash)}))`)
     }
@@ -1092,7 +1092,7 @@ async function runIndependent (packagesInput: string): Promise<void> {
   })
 
   if (plan.unrouted.length) {
-    console.log(`Unrouted commits (${plan.unrouted.length}, bump nothing):`)
+    console.log(`Other commits (${plan.unrouted.length}, bump nothing):`)
     for (const commit of plan.unrouted) {
       console.log(`  ${commit.shortHash} ${commit.message}`)
     }

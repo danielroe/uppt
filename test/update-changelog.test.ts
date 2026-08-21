@@ -561,14 +561,14 @@ describe('independent release PR', () => {
     const plan = fontainePlan([commit('feat(fontaine): thing'), commit('docs: update readme')])
     const body = buildIndependentBody(plan, bodyOpts)
 
-    expect(body).toContain('### 🧭 Unrouted commits')
+    expect(body).toContain('### 📝 Other commits')
     expect(body).toContain('not routed to any package')
     expect(body).toContain('docs: update readme')
   })
 
   it('omits the unrouted section when every commit is routed', () => {
     const body = buildIndependentBody(fontainePlan([commit('feat(fontaine): thing')]), bodyOpts)
-    expect(body).not.toContain('Unrouted commits')
+    expect(body).not.toContain('Other commits')
   })
 
   it('preserves the preamble across regenerations', () => {
