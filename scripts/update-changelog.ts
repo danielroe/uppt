@@ -1115,7 +1115,7 @@ async function runIndependent (packagesInput: string): Promise<void> {
   const repo = getRepo()
   const baseBranch = getCurrentBranch()
   const releaseBranch = `release/${baseBranch}-pending`
-  const title = `chore(release): ${plan.releases.length} package${plan.releases.length === 1 ? '' : 's'}`
+  const title = `chore: release ${plan.releases.length} package${plan.releases.length === 1 ? '' : 's'}`
 
   console.log(`Base branch: ${baseBranch}`)
   console.log(`Release branch: ${releaseBranch}`)
@@ -1191,7 +1191,7 @@ async function runIndependent (packagesInput: string): Promise<void> {
   const currentPR = existing[0]
   const preamble = extractPreamble(currentPR?.body)
     || seedPreamble
-    || `> The next independent release, covering every package with unreleased changes.\n>\n> **Timetable**: to be announced.`
+    || `> The next set of package releases, covering all packages with unreleased changes.\n>\n> **Timetable**: to be announced.`
 
   const body = buildIndependentBody(plan, {
     owner: repo.owner,
