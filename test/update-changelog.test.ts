@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { buildBumpFileSet, buildIndependentBody, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, type Commit } from '../scripts/update-changelog.ts'
+import { buildBumpFileSet, buildIndependentBody, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, type Commit } from '../scripts/update-changelog.ts'
 import { resolveWorkspaces } from '../scripts/_workspaces.ts'
 
 let tmp: string
@@ -546,6 +546,41 @@ describe('independent release PR', () => {
     expect(fontaineIndex).toBeGreaterThan(-1)
     expect(fontlessIndex).toBeGreaterThan(fontaineIndex)
     expect(body).toContain('add metric overrides')
+  })
+
+  it('drops the package scope when it matches the section it renders in', () => {
+    const body = buildIndependentBody(fontainePlan([commit('fix(fontaine): don\'t add fallbacks to generic families')]), bodyOpts)
+
+    expect(body).toContain('- don\'t add fallbacks to generic families')
+    expect(body).not.toContain('**fontaine:**')
+  })
+
+  it('keeps the full scope list for multi-package commits', () => {
+    const changelog = formatChangelog(
+      [commit('fix(fontaine,fontless): shared fix')],
+      { owner: 'unjs', repo: 'fontaine', fromRef: null, toRef: 'main', packageScopes: ['fontaine'] },
+    )
+
+    expect(changelog).toContain('**fontaine,fontless:** shared fix')
+  })
+
+  it('keeps a scope the section does not own, and renders unscoped commits unchanged', () => {
+    const changelog = formatChangelog(
+      [commit('fix(ci): tighten workflow'), commit('fix: unscoped thing')],
+      { owner: 'unjs', repo: 'fontaine', fromRef: null, toRef: 'main', packageScopes: ['fontaine'] },
+    )
+
+    expect(changelog).toContain('**ci:** tighten workflow')
+    expect(changelog).toContain('- unscoped thing')
+  })
+
+  it('leaves scopes alone for fixed (lockstep) changelogs', () => {
+    const changelog = formatChangelog(
+      [commit('fix(fontaine): a fix')],
+      { owner: 'unjs', repo: 'fontaine', fromRef: null, toRef: 'main' },
+    )
+
+    expect(changelog).toContain('**fontaine:** a fix')
   })
 
   it('notes the propagation cause for dependency-only releases', () => {

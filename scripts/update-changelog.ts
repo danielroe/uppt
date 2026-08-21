@@ -322,6 +322,8 @@ export interface PackageRelease {
   ownCommits: boolean
   /** Commits routed to this package. Empty for propagated-only releases. */
   commits: Commit[]
+  /** Commit scopes that route to this package, including its own name. */
+  scopes: string[]
 }
 
 export interface IndependentReleasePlan {
@@ -374,6 +376,10 @@ export function computeIndependentPlan (opts: {
     if (commits.length) planned.push({ name: ws.name, bump: determineBump(commits) })
   }
 
+  const scopesByName = new Map(
+    scopeMap.entries().map(({ workspace, scopes }) => [workspace.name, [...new Set([workspace.name, ...scopes])]]),
+  )
+
   const graph = buildDependencyGraph(opts.workspaces)
   const byName = new Map(opts.workspaces.map(ws => [ws.name, ws]))
   const releases = propagateReleases(graph, planned).map((release) => {
@@ -390,6 +396,7 @@ export function computeIndependentPlan (opts: {
       bump: release.bump,
       ownCommits: release.ownCommits,
       commits: release.ownCommits ? routed.get(release.name)! : [],
+      scopes: scopesByName.get(release.name) ?? [release.name],
     }
   })
 
@@ -398,7 +405,18 @@ export function computeIndependentPlan (opts: {
 
 export function formatChangelog (
   commits: Commit[],
-  opts: { owner: string, repo: string, fromRef: Tag | null, toRef: string },
+  opts: {
+    owner: string
+    repo: string
+    fromRef: Tag | null
+    toRef: string
+    /**
+     * Scopes that route to the package this changelog section belongs to.
+     * A commit whose only scope is one of these has it dropped from the
+     * rendered line: the section heading already names the package.
+     */
+    packageScopes?: string[]
+  },
 ): string {
   const grouped = new Map<string, Commit[]>()
   for (const c of commits) {
@@ -423,7 +441,9 @@ export function formatChangelog (
     if (!items?.length) continue
     lines.push(`### ${TYPE_TITLES[type]}`, '')
     for (const c of items) {
-      const scope = c.scope ? `**${c.scope}:** ` : ''
+      const ownScopes = c.scope.split(',').map(s => s.trim()).filter(Boolean)
+      const redundant = ownScopes.length === 1 && Boolean(opts.packageScopes?.includes(ownScopes[0]!))
+      const scope = c.scope && !redundant ? `**${c.scope}:** ` : ''
       const breaking = c.isBreaking ? '⚠️  ' : ''
       // Prefer PR references; fall back to a link to the commit itself so
       // every line is traceable to something on GitHub.
@@ -917,6 +937,7 @@ export function buildIndependentBody (
         repo: opts.repo,
         fromRef: release.fromTag,
         toRef: opts.branch,
+        packageScopes: release.scopes,
       }), '')
     } else {
       const causes = propagationCauses(release, releasedNames)
