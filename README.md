@@ -76,7 +76,7 @@ jobs:
       contents: write       # push the `release/vX.Y.Z` branch and delete superseded ones
       pull-requests: write  # create a release PR, update its body, close superseded PRs
     steps:
-      - uses: danielroe/uppt/pr@ac5677436f6aa3b06c98b811bd1e9ca0a768c90f # v0.6.3
+      - uses: danielroe/uppt/pr@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: ${{ inputs.prerelease }}
@@ -101,7 +101,7 @@ jobs:
       contents: write       # push the `vX.Y.Z` tag and create the GitHub release
       actions: write        # `gh workflow run release.yml --ref vX.Y.Z` chained dispatch
     steps:
-      - uses: danielroe/uppt/release@ac5677436f6aa3b06c98b811bd1e9ca0a768c90f # v0.6.3
+      - uses: danielroe/uppt/release@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -121,7 +121,7 @@ jobs:
       files: ${{ steps.pack.outputs.files }}
     steps:
       - id: pack
-        uses: danielroe/uppt/pack@ac5677436f6aa3b06c98b811bd1e9ca0a768c90f # v0.6.3
+        uses: danielroe/uppt/pack@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
 
   # `publish` downloads the prebuilt tarball from the pack job's
   # artifact and stages it for publish.
@@ -139,7 +139,7 @@ jobs:
       id-token: write       # OIDC claim for npm trusted publisher
     environment: npm        # must match the trusted-publisher entry on npmjs.com
     steps:
-      - uses: danielroe/uppt/publish@ac5677436f6aa3b06c98b811bd1e9ca0a768c90f # v0.6.3
+      - uses: danielroe/uppt/publish@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
         with:
           files: ${{ needs.pack.outputs.files }}
 ```
@@ -233,7 +233,7 @@ Declare the publishable workspaces by passing the same `packages:` input to `upp
   pr:
     # ...
     steps:
-      - uses: danielroe/uppt/pr@ac5677436f6aa3b06c98b811bd1e9ca0a768c90f # v0.6.3
+      - uses: danielroe/uppt/pr@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           packages: |
@@ -243,7 +243,7 @@ Declare the publishable workspaces by passing the same `packages:` input to `upp
   release:
     # ...
     steps:
-      - uses: danielroe/uppt/release@ac5677436f6aa3b06c98b811bd1e9ca0a768c90f # v0.6.3
+      - uses: danielroe/uppt/release@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           packages: |
@@ -253,7 +253,7 @@ Declare the publishable workspaces by passing the same `packages:` input to `upp
   pack:
     # ...
     steps:
-      - uses: danielroe/uppt/pack@ac5677436f6aa3b06c98b811bd1e9ca0a768c90f # v0.6.3
+      - uses: danielroe/uppt/pack@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
         with:
           packages: |
             packages/*
@@ -340,7 +340,7 @@ jobs:
       contents: write       # push the `release/vX.Y.Z` branch and delete superseded ones
       pull-requests: write  # create a release PR, update its body, close superseded PRs
     steps:
-      - uses: danielroe/uppt/pr@ac5677436f6aa3b06c98b811bd1e9ca0a768c90f # v0.6.3
+      - uses: danielroe/uppt/pr@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: ${{ inputs.prerelease }}
@@ -369,7 +369,7 @@ jobs:
       contents: write       # push the `<name>@X.Y.Z` tags and create the GitHub release
       actions: write        # chained dispatch of the publish run
     steps:
-      - uses: danielroe/uppt/release@ac5677436f6aa3b06c98b811bd1e9ca0a768c90f # v0.6.3
+      - uses: danielroe/uppt/release@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           mode: independent
@@ -394,7 +394,7 @@ jobs:
       files: ${{ steps.pack.outputs.files }}
     steps:
       - id: pack
-        uses: danielroe/uppt/pack@ac5677436f6aa3b06c98b811bd1e9ca0a768c90f # v0.6.3
+        uses: danielroe/uppt/pack@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
         with:
           releases: ${{ inputs.releases }}
           packages: |
@@ -416,7 +416,7 @@ jobs:
       id-token: write       # OIDC claim for npm trusted publisher
     environment: npm        # must match the trusted-publisher entry on npmjs.com
     steps:
-      - uses: danielroe/uppt/publish@ac5677436f6aa3b06c98b811bd1e9ca0a768c90f # v0.6.3
+      - uses: danielroe/uppt/publish@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
         with:
           files: ${{ needs.pack.outputs.files }}
           releases: ${{ inputs.releases }}
