@@ -20,7 +20,7 @@ inputs:
     required: false
     default: ''
   releases:
-    description: 'Independent-mode publish payload: the ordered JSON array of `{ name, version, dir }` entries emitted by `uppt/release` and delivered via the workflow''s `releases` dispatch input (`${{ inputs.releases }}`). Never set by hand. When present, the run must be on the matching `release-YYYY-MM-DD-<sha>` coordination tag, and (when `files` is omitted) tarballs are staged in the payload''s topological order.'
+    description: 'Independent-mode publish payload: the ordered JSON array of `{ name, version, dir }` entries emitted by `uppt/release` and delivered via the workflow''s `releases` dispatch input. Never set by hand. When present, the run must be on the matching `release-YYYY-MM-DD-<sha>` coordination tag, and (when `files` is omitted) tarballs are staged in the payload''s topological order.'
     required: false
     default: ''
 
