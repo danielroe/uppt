@@ -527,6 +527,41 @@ async function getReleaseBranchState (
   return branchHead === baseInfo.commit.sha ? 'at-base' : 'has-bump'
 }
 
+/** Create a tree layering `files` over `baseTree`, returning its sha. */
+async function createTree (
+  repo: { owner: string, repo: string },
+  baseTree: string,
+  files: FileToCommit[],
+): Promise<string> {
+  const blobs = await Promise.all(files.map(async (file) => {
+    const blob = await gh<{ sha: string }>(
+      `/repos/${repo.owner}/${repo.repo}/git/blobs`,
+      {
+        method: 'POST',
+        requireAuth: true,
+        body: JSON.stringify({
+          content: Buffer.from(file.content, 'utf8').toString('base64'),
+          encoding: 'base64',
+        }),
+      },
+    )
+    return { path: file.path, sha: blob.sha }
+  }))
+
+  const tree = await gh<{ sha: string }>(
+    `/repos/${repo.owner}/${repo.repo}/git/trees`,
+    {
+      method: 'POST',
+      requireAuth: true,
+      body: JSON.stringify({
+        base_tree: baseTree,
+        tree: blobs.map(b => ({ path: b.path, mode: '100644', type: 'blob', sha: b.sha })),
+      }),
+    },
+  )
+  return tree.sha
+}
+
 interface FileToCommit {
   /** Path relative to the repo root, using forward slashes. */
   path: string
@@ -578,37 +613,7 @@ async function commitFilesToBranch (
     { requireAuth: true },
   )
 
-  const blobs = await Promise.all(opts.files.map(async (file) => {
-    const blob = await gh<{ sha: string }>(
-      `/repos/${repo.owner}/${repo.repo}/git/blobs`,
-      {
-        method: 'POST',
-        requireAuth: true,
-        body: JSON.stringify({
-          content: Buffer.from(file.content, 'utf8').toString('base64'),
-          encoding: 'base64',
-        }),
-      },
-    )
-    return { path: file.path, sha: blob.sha }
-  }))
-
-  const tree = await gh<{ sha: string }>(
-    `/repos/${repo.owner}/${repo.repo}/git/trees`,
-    {
-      method: 'POST',
-      requireAuth: true,
-      body: JSON.stringify({
-        base_tree: parentCommit.tree.sha,
-        tree: blobs.map(b => ({
-          path: b.path,
-          mode: '100644',
-          type: 'blob',
-          sha: b.sha,
-        })),
-      }),
-    },
-  )
+  const tree = await createTree(repo, parentCommit.tree.sha, opts.files)
 
   const commit = await gh<{ sha: string }>(
     `/repos/${repo.owner}/${repo.repo}/git/commits`,
@@ -617,7 +622,7 @@ async function commitFilesToBranch (
       requireAuth: true,
       body: JSON.stringify({
         message: opts.message,
-        tree: tree.sha,
+        tree,
         parents: [parentSha],
       }),
     },
@@ -631,30 +636,83 @@ async function commitFilesToBranch (
 }
 
 /**
- * Point `opts.branch` at `opts.base`'s current tip, creating it if it
- * doesn't exist. Force-updates: any previous bump commit on the branch
- * is discarded, ready to be replaced by a fresh one.
+ * Replace `opts.branch` with exactly one commit on top of `opts.base`'s
+ * current tip, containing every file in `opts.files`.
+ *
+ * The commit is built against the base tip and the ref is force-updated in
+ * a single operation: resetting the branch to the base tip first would
+ * momentarily leave the release PR with no commits, and GitHub closes a PR
+ * whose head becomes identical to its base. If the branch already holds an
+ * equivalent commit (same parent, same tree, same message) the ref is left
+ * untouched, so a no-op run doesn't force-push.
  */
-async function resetBranchToBase (
+async function replaceBranchWithCommit (
   repo: { owner: string, repo: string },
-  opts: { base: string, branch: string },
+  opts: { base: string, branch: string, message: string, files: FileToCommit[] },
 ): Promise<void> {
+  if (!opts.files.length) {
+    throw new Error('replaceBranchWithCommit: refusing to commit with no files')
+  }
+
   const baseInfo = await gh<{ commit: { sha: string } }>(
     `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.base)}`,
     { requireAuth: true },
   )
+  const baseSha = baseInfo.commit.sha
+  const baseCommit = await gh<{ tree: { sha: string } }>(
+    `/repos/${repo.owner}/${repo.repo}/git/commits/${baseSha}`,
+    { requireAuth: true },
+  )
+
+  const tree = await createTree(repo, baseCommit.tree.sha, opts.files)
+
+  let existing: { sha: string, tree: string, parents: string[], message: string } | null = null
   try {
+    const branchInfo = await gh<{ commit: { sha: string, commit: { tree: { sha: string }, message: string }, parents: Array<{ sha: string }> } }>(
+      `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.branch)}`,
+      { requireAuth: true },
+    )
+    existing = {
+      sha: branchInfo.commit.sha,
+      tree: branchInfo.commit.commit.tree.sha,
+      parents: branchInfo.commit.parents.map(p => p.sha),
+      message: branchInfo.commit.commit.message,
+    }
+  } catch (err) {
+    if (!(err instanceof Error) || !/-> 404\b/.test(err.message)) throw err
+  }
+
+  if (
+    existing
+    && existing.tree === tree
+    && existing.message === opts.message
+    && existing.parents.length === 1
+    && existing.parents[0] === baseSha
+  ) {
+    console.log(`Branch ${opts.branch} is already up to date at ${existing.sha.slice(0, 7)}`)
+    return
+  }
+
+  const commit = await gh<{ sha: string }>(
+    `/repos/${repo.owner}/${repo.repo}/git/commits`,
+    {
+      method: 'POST',
+      requireAuth: true,
+      body: JSON.stringify({ message: opts.message, tree, parents: [baseSha] }),
+    },
+  )
+
+  if (existing) {
     await gh(`/repos/${repo.owner}/${repo.repo}/git/refs/heads/${opts.branch}`, {
       method: 'PATCH',
       requireAuth: true,
-      body: JSON.stringify({ sha: baseInfo.commit.sha, force: true }),
+      body: JSON.stringify({ sha: commit.sha, force: true }),
     })
-  } catch (err) {
-    if (!(err instanceof Error) || !/-> (?:404|422)\b/.test(err.message)) throw err
+  } else {
     await gh(`/repos/${repo.owner}/${repo.repo}/git/refs`, {
       method: 'POST',
       requireAuth: true,
-      body: JSON.stringify({ ref: `refs/heads/${opts.branch}`, sha: baseInfo.commit.sha }),
+      body: JSON.stringify({ ref: `refs/heads/${opts.branch}`, sha: commit.sha }),
     })
   }
 }
@@ -1164,11 +1222,10 @@ async function runIndependent (packagesInput: string): Promise<void> {
       throw new Error('GITHUB_TOKEN is required to create the release branch')
     }
     // The pending branch name never changes, but the plan behind it does
-    // (packages join and drop as commits land on base). Reset the branch to
-    // the base tip and land one fresh bump commit so the branch is always
-    // exactly base + one commit, with no stale manifests left behind.
-    await resetBranchToBase(repo, { base: baseBranch, branch: releaseBranch })
-    await commitFilesToBranch(repo, {
+    // (packages join and drop as commits land on base), so the branch is
+    // rebuilt as exactly base + one bump commit, with no stale manifests
+    // left behind.
+    await replaceBranchWithCommit(repo, {
       base: baseBranch,
       branch: releaseBranch,
       message: title,
