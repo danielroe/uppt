@@ -635,24 +635,106 @@ async function commitFilesToBranch (
   })
 }
 
+export interface BranchDivergence {
+  /** Files the branch changes relative to its merge base with the target base. */
+  changed: Set<string>
+  mergeBase: string
+  behindBy: number
+}
+
 /**
- * Replace `opts.branch` with exactly one commit on top of `opts.base`'s
- * current tip, containing every file in `opts.files`.
+ * Decide whether `opts.branch` still represents `opts.files` correctly, or
+ * has to be rebuilt. Returns `null` when the branch is fine as it stands.
  *
- * The commit is built against the base tip and the ref is force-updated in
- * a single operation: resetting the branch to the base tip first would
- * momentarily leave the release PR with no commits, and GitHub closes a PR
- * whose head becomes identical to its base. If the branch already holds an
- * equivalent commit (same parent, same tree, same message) the ref is left
- * untouched, so a no-op run doesn't force-push.
+ * A branch that is simply behind base is left alone: the diff it carries is
+ * still the diff we want, and GitHub can merge it. Rebuilding is only needed
+ * when the branch's own diff no longer matches the plan, or when base has
+ * since touched one of the same files (which would conflict on merge).
  */
-async function replaceBranchWithCommit (
+export function releaseBranchDrift (opts: {
+  /** `null` when the branch doesn't exist yet. */
+  divergence: BranchDivergence | null
+  /** Desired file contents, keyed by repo-relative path. */
+  desired: Map<string, string>
+  /** Current contents of those same paths on the branch. */
+  branchContents: Map<string, string | null>
+  /** Desired paths that base has changed since the merge base. */
+  baseTouched: string[]
+}): string | null {
+  if (!opts.divergence) return 'branch does not exist'
+
+  const desiredPaths = [...opts.desired.keys()]
+  const changed = opts.divergence.changed
+  if (changed.size !== desiredPaths.length || desiredPaths.some(path => !changed.has(path))) {
+    return `branch changes ${[...changed].join(', ') || 'nothing'}, plan changes ${desiredPaths.join(', ')}`
+  }
+
+  for (const path of desiredPaths) {
+    if (opts.branchContents.get(path) !== opts.desired.get(path)) return `${path} differs from the plan`
+  }
+
+  if (opts.baseTouched.length) return `base has since changed ${opts.baseTouched.join(', ')}`
+
+  return null
+}
+
+/**
+ * Make `opts.branch` carry exactly `opts.files` as its diff against
+ * `opts.base`, rebuilding it as a single commit on the base tip only when
+ * that isn't already true (see `releaseBranchDrift`). A rebuild always
+ * force-updates the ref straight to the new commit rather than resetting to
+ * base first: a branch that momentarily equals its base makes GitHub close
+ * the open PR as having nothing to merge.
+ */
+async function syncReleaseBranch (
   repo: { owner: string, repo: string },
   opts: { base: string, branch: string, message: string, files: FileToCommit[] },
 ): Promise<void> {
   if (!opts.files.length) {
-    throw new Error('replaceBranchWithCommit: refusing to commit with no files')
+    throw new Error('syncReleaseBranch: refusing to commit with no files')
   }
+
+  const desired = new Map(opts.files.map(file => [file.path, file.content]))
+  const desiredPaths = [...desired.keys()]
+
+  let divergence: BranchDivergence | null = null
+  try {
+    const cmp = await gh<{ files?: Array<{ filename: string }>, merge_base_commit: { sha: string }, behind_by: number }>(
+      `/repos/${repo.owner}/${repo.repo}/compare/${encodeURIComponent(opts.base)}...${encodeURIComponent(opts.branch)}`,
+      { requireAuth: true },
+    )
+    divergence = {
+      changed: new Set((cmp.files ?? []).map(file => file.filename)),
+      mergeBase: cmp.merge_base_commit.sha,
+      behindBy: cmp.behind_by,
+    }
+  } catch (err) {
+    if (!(err instanceof Error) || !/-> 404\b/.test(err.message)) throw err
+  }
+
+  const branchContents = new Map<string, string | null>()
+  const baseTouched: string[] = []
+  if (divergence) {
+    for (const path of desiredPaths) {
+      branchContents.set(path, await getFileContent(repo, path, opts.branch))
+    }
+    if (divergence.behindBy > 0) {
+      const baseCmp = await gh<{ files?: Array<{ filename: string }> }>(
+        `/repos/${repo.owner}/${repo.repo}/compare/${divergence.mergeBase}...${encodeURIComponent(opts.base)}`,
+        { requireAuth: true },
+      )
+      for (const file of baseCmp.files ?? []) {
+        if (desired.has(file.filename)) baseTouched.push(file.filename)
+      }
+    }
+  }
+
+  const drift = releaseBranchDrift({ divergence, desired, branchContents, baseTouched })
+  if (!drift) {
+    console.log(`Branch ${opts.branch} already carries the release plan; leaving it untouched.`)
+    return
+  }
+  console.log(`Rebuilding ${opts.branch} on ${opts.base}: ${drift}`)
 
   const baseInfo = await gh<{ commit: { sha: string } }>(
     `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.base)}`,
@@ -663,35 +745,7 @@ async function replaceBranchWithCommit (
     `/repos/${repo.owner}/${repo.repo}/git/commits/${baseSha}`,
     { requireAuth: true },
   )
-
   const tree = await createTree(repo, baseCommit.tree.sha, opts.files)
-
-  let existing: { sha: string, tree: string, parents: string[], message: string } | null = null
-  try {
-    const branchInfo = await gh<{ commit: { sha: string, commit: { tree: { sha: string }, message: string }, parents: Array<{ sha: string }> } }>(
-      `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.branch)}`,
-      { requireAuth: true },
-    )
-    existing = {
-      sha: branchInfo.commit.sha,
-      tree: branchInfo.commit.commit.tree.sha,
-      parents: branchInfo.commit.parents.map(p => p.sha),
-      message: branchInfo.commit.commit.message,
-    }
-  } catch (err) {
-    if (!(err instanceof Error) || !/-> 404\b/.test(err.message)) throw err
-  }
-
-  if (
-    existing
-    && existing.tree === tree
-    && existing.message === opts.message
-    && existing.parents.length === 1
-    && existing.parents[0] === baseSha
-  ) {
-    console.log(`Branch ${opts.branch} is already up to date at ${existing.sha.slice(0, 7)}`)
-    return
-  }
 
   const commit = await gh<{ sha: string }>(
     `/repos/${repo.owner}/${repo.repo}/git/commits`,
@@ -702,7 +756,7 @@ async function replaceBranchWithCommit (
     },
   )
 
-  if (existing) {
+  if (divergence) {
     await gh(`/repos/${repo.owner}/${repo.repo}/git/refs/heads/${opts.branch}`, {
       method: 'PATCH',
       requireAuth: true,
@@ -714,6 +768,24 @@ async function replaceBranchWithCommit (
       requireAuth: true,
       body: JSON.stringify({ ref: `refs/heads/${opts.branch}`, sha: commit.sha }),
     })
+  }
+}
+
+async function getFileContent (
+  repo: { owner: string, repo: string },
+  path: string,
+  ref: string,
+): Promise<string | null> {
+  try {
+    const data = await gh<{ content?: string, encoding?: string }>(
+      `/repos/${repo.owner}/${repo.repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(ref)}`,
+      { requireAuth: true },
+    )
+    if (data.encoding !== 'base64' || typeof data.content !== 'string') return null
+    return Buffer.from(data.content, 'base64').toString('utf8')
+  } catch (err) {
+    if (err instanceof Error && /-> 404\b/.test(err.message)) return null
+    throw err
   }
 }
 
@@ -1222,10 +1294,9 @@ async function runIndependent (packagesInput: string): Promise<void> {
       throw new Error('GITHUB_TOKEN is required to create the release branch')
     }
     // The pending branch name never changes, but the plan behind it does
-    // (packages join and drop as commits land on base), so the branch is
-    // rebuilt as exactly base + one bump commit, with no stale manifests
-    // left behind.
-    await replaceBranchWithCommit(repo, {
+    // (packages join and drop as commits land on base), so the branch has to
+    // end up carrying exactly the current plan and nothing stale.
+    await syncReleaseBranch(repo, {
       base: baseBranch,
       branch: releaseBranch,
       message: title,

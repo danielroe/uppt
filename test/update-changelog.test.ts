@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { buildBumpFileSet, buildIndependentBody, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, incVersion, latestLockstepTag, latestTagForPackage, type Commit } from '../scripts/update-changelog.ts'
+import { buildBumpFileSet, buildIndependentBody, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, type Commit } from '../scripts/update-changelog.ts'
 import { resolveWorkspaces } from '../scripts/_workspaces.ts'
 
 let tmp: string
@@ -636,5 +636,55 @@ describe('independent release PR', () => {
     }))
 
     expect(files.map(f => f.path)).toEqual(['packages/a/package.json'])
+  })
+})
+
+describe('releaseBranchDrift', () => {
+  const desired = new Map([['packages/a/package.json', '{"version":"1.1.0"}\n']])
+  const inSync = {
+    divergence: { changed: new Set(['packages/a/package.json']), mergeBase: 'abc', behindBy: 0 },
+    desired,
+    branchContents: new Map([['packages/a/package.json', '{"version":"1.1.0"}\n']]),
+    baseTouched: [],
+  }
+
+  it('leaves an up-to-date branch alone', () => {
+    expect(releaseBranchDrift(inSync)).toBe(null)
+  })
+
+  it('leaves a branch that is merely behind base alone', () => {
+    expect(releaseBranchDrift({
+      ...inSync,
+      divergence: { ...inSync.divergence, behindBy: 12 },
+    })).toBe(null)
+  })
+
+  it('rebuilds when the branch does not exist', () => {
+    expect(releaseBranchDrift({ ...inSync, divergence: null })).toBe('branch does not exist')
+  })
+
+  it('rebuilds when the branch bumps a package the plan no longer includes', () => {
+    expect(releaseBranchDrift({
+      ...inSync,
+      divergence: {
+        ...inSync.divergence,
+        changed: new Set(['packages/a/package.json', 'packages/b/package.json']),
+      },
+    })).toMatch(/packages\/b\/package\.json/)
+  })
+
+  it('rebuilds when the branch holds a stale version', () => {
+    expect(releaseBranchDrift({
+      ...inSync,
+      branchContents: new Map([['packages/a/package.json', '{"version":"1.0.1"}\n']]),
+    })).toBe('packages/a/package.json differs from the plan')
+  })
+
+  it('rebuilds when base has since touched the same manifest', () => {
+    expect(releaseBranchDrift({
+      ...inSync,
+      divergence: { ...inSync.divergence, behindBy: 3 },
+      baseTouched: ['packages/a/package.json'],
+    })).toBe('base has since changed packages/a/package.json')
   })
 })
