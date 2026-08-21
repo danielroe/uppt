@@ -24,6 +24,7 @@ import process from 'node:process'
 import { execFileSync } from 'node:child_process'
 import { isSemver, resolveCurrentVersion, resolveWorkspaces } from './_workspaces.ts'
 import { coordinationTag, deriveReleaseSet, packageTag, releaseTitle, serialiseReleases } from './_independent.ts'
+import { getAllTags } from './update-changelog.ts'
 
 function run (cmd: string, args: string[], opts: { env?: NodeJS.ProcessEnv } = {}) {
   execFileSync(cmd, args, { stdio: 'inherit', env: { ...process.env, ...opts.env } })
@@ -61,23 +62,18 @@ function createTag (repo: string, tag: string, sha: string, env: NodeJS.ProcessE
   ], { env })
 }
 
-function allTags (): string[] {
-  return capture('git', ['for-each-ref', '--sort=-creatordate', '--format=%(refname:strip=2)', 'refs/tags'])
-    .split('\n').map(s => s.trim()).filter(Boolean)
-}
-
 function mainIndependent (repo: string, ghEnv: NodeJS.ProcessEnv) {
   const packagesInput = process.env.PACKAGES?.trim() ?? ''
   if (!packagesInput) throw new Error('`mode: independent` requires the `packages` input.')
 
   const workspaces = resolveWorkspaces(process.cwd(), packagesInput)
-  const releases = deriveReleaseSet(workspaces, allTags())
+  const releases = deriveReleaseSet(workspaces, getAllTags())
   if (!releases.length) {
     throw new Error('No workspace version differs from its latest tag; nothing to release. Was the release PR merged without version bumps?')
   }
 
   const sha = capture('git', ['rev-parse', 'HEAD'])
-  const localTags = new Set(allTags())
+  const localTags = new Set(getAllTags())
   const coordTag = coordinationTag(new Date(), tag => localTags.has(tag) || tagExists(repo, tag, ghEnv))
   const tags = [...releases.map(packageTag), coordTag]
 

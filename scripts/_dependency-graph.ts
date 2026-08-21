@@ -12,7 +12,7 @@ import type { Workspace } from './_workspaces.ts'
 // a `workspace:` devDependency can never leave a stale pin in the
 // published tarball. Propagating on one would produce a release with no
 // user-visible change.
-const DEPENDENCY_FIELDS = [
+export const DEPENDENCY_FIELDS = [
   'dependencies',
   'peerDependencies',
   'optionalDependencies',

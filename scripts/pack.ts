@@ -66,22 +66,15 @@ function main () {
   const ref = process.env.GITHUB_REF ?? ''
   const releases = releasesFromEnv(process.env.RELEASES)
 
+  const tag = ref.startsWith('refs/tags/') ? ref.slice('refs/tags/'.length) : ''
   if (releases) {
-    const tag = ref.startsWith('refs/tags/') ? ref.slice('refs/tags/'.length) : ''
     if (!COORDINATION_TAG_RE.test(tag)) {
       throw new Error(`RELEASES is set, so GITHUB_REF must be a 'refs/tags/release-YYYY-MM-DD' coordination tag, got '${ref || '<unset>'}'`)
     }
   }
-  else {
-    if (!ref.startsWith('refs/tags/v')) {
-      throw new Error(`GITHUB_REF must be a 'refs/tags/v*' ref, got '${ref || '<unset>'}'`)
-    }
-    const tag = ref.slice('refs/tags/'.length)
-    if (!/^v\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(tag)) {
-      throw new Error(`Refusing to pack: tag "${tag}" is not strict semver`)
-    }
+  else if (!/^v\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(tag)) {
+    throw new Error(`GITHUB_REF must be a strict-semver 'refs/tags/v*' ref, got '${ref || '<unset>'}'`)
   }
-  const tag = ref.slice('refs/tags/'.length)
 
   const outDir = process.env.PACK_OUT_DIR
   if (!outDir) throw new Error('PACK_OUT_DIR is required')

@@ -34,7 +34,7 @@ import { resolve } from 'node:path'
 import { makePkgFormatter } from './pkg-format.ts'
 
 import { buildScopeMap, parseScopesInput, resolveCurrentVersion, resolveWorkspaces, type Workspace } from './_workspaces.ts'
-import { buildDependencyGraph, propagateReleases, type BumpLevel } from './_dependency-graph.ts'
+import { buildDependencyGraph, DEPENDENCY_FIELDS, propagateReleases, type BumpLevel } from './_dependency-graph.ts'
 
 export interface Commit {
   hash: string
@@ -71,6 +71,9 @@ const TYPE_TITLES: Record<string, string> = {
 
 const KNOWN_TYPES = new Set(Object.keys(TYPE_TITLES))
 
+const isReleaseWorthy = (c: Commit) =>
+  KNOWN_TYPES.has(c.type) && !(c.type === 'chore' && c.scope === 'deps')
+
 const git = (...args: string[]) =>
   execFileSync('git', args, { encoding: 'utf8' }).trim()
 
@@ -92,7 +95,7 @@ function getCurrentBranch (): string {
 
 export interface Tag { name: string, ref: string }
 
-function getAllTags (): string[] {
+export function getAllTags (): string[] {
   try {
     return execFileSync(
       'git',
@@ -420,8 +423,7 @@ export function formatChangelog (
 ): string {
   const grouped = new Map<string, Commit[]>()
   for (const c of commits) {
-    if (!KNOWN_TYPES.has(c.type)) continue
-    if (c.type === 'chore' && c.scope === 'deps') continue
+    if (!isReleaseWorthy(c)) continue
     const list = grouped.get(c.type) || []
     list.push(c)
     grouped.set(c.type, list)
@@ -522,6 +524,92 @@ async function getContributors (
     out.push({ name: commit.author.name, username: login, isFirstTime })
   }
   return out
+}
+
+/**
+ * Close open release PRs on `baseBranch` that `isStale` matches, deleting
+ * their branches. Returns the preamble of the most recently updated stale
+ * PR (if any) so the maintainer's intro text can be carried over.
+ */
+async function closeSupersededPRs (
+  repo: { owner: string, repo: string },
+  baseBranch: string,
+  isStale: (headRef: string) => boolean,
+): Promise<string | null> {
+  let seedPreamble: string | null = null
+  const openReleasePRs = await gh<Array<{ number: number, body: string | null, head: { ref: string, repo: { full_name: string } | null }, base: { ref: string }, updated_at: string }>>(
+    `/repos/${repo.owner}/${repo.repo}/pulls?state=open&per_page=100&base=${encodeURIComponent(baseBranch)}&head=${repo.owner}:`,
+    { requireAuth: true },
+  )
+  const sameRepo = `${repo.owner}/${repo.repo}`
+  const stale = openReleasePRs
+    .filter(pr =>
+      pr.head.repo?.full_name === sameRepo
+      && isStale(pr.head.ref)
+      && pr.base.ref === baseBranch,
+    )
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+  for (const pr of stale) {
+    console.log(`Closing superseded release PR #${pr.number} (${pr.head.ref})`)
+    const preamble = extractPreamble(pr.body)
+    if (preamble && !seedPreamble) seedPreamble = preamble
+    await gh(`/repos/${repo.owner}/${repo.repo}/pulls/${pr.number}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ state: 'closed' }),
+      requireAuth: true,
+    })
+    try {
+      await gh(`/repos/${repo.owner}/${repo.repo}/git/refs/heads/${pr.head.ref}`, {
+        method: 'DELETE',
+        requireAuth: true,
+      })
+    }
+    catch (err) {
+      console.warn(`  could not delete branch ${pr.head.ref}:`, err)
+    }
+  }
+  return seedPreamble
+}
+
+async function findOpenPR (
+  repo: { owner: string, repo: string },
+  branch: string,
+): Promise<{ number: number, body: string | null } | undefined> {
+  const existing = await gh<Array<{ number: number, body: string | null }>>(
+    `/repos/${repo.owner}/${repo.repo}/pulls?head=${repo.owner}:${branch}&state=open`,
+  )
+  return existing[0]
+}
+
+/** Update `currentPR` in place, or open a new draft PR when there is none. */
+async function upsertReleasePR (
+  repo: { owner: string, repo: string },
+  opts: { currentPR?: { number: number }, title: string, head: string, base: string, body: string },
+): Promise<void> {
+  if (opts.currentPR) {
+    await gh(`/repos/${repo.owner}/${repo.repo}/pulls/${opts.currentPR.number}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title: opts.title, body: opts.body }),
+      requireAuth: true,
+    })
+    console.log(`Updated PR #${opts.currentPR.number}`)
+  } else {
+    const created = await gh<{ number: number, html_url: string }>(
+      `/repos/${repo.owner}/${repo.repo}/pulls`,
+      {
+        method: 'POST',
+        requireAuth: true,
+        body: JSON.stringify({
+          title: opts.title,
+          head: opts.head,
+          base: opts.base,
+          body: opts.body,
+          draft: true,
+        }),
+      },
+    )
+    console.log(`Created PR #${created.number}: ${created.html_url}`)
+  }
 }
 
 type ReleaseBranchState = 'missing' | 'at-base' | 'has-bump'
@@ -895,8 +983,6 @@ export function extractPreamble (body: string | null | undefined): string | null
   return preamble || null
 }
 
-const DEPENDENCY_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'] as const
-
 function propagationCauses (release: PackageRelease, releasedNames: Set<string>): string[] {
   const causes = new Set<string>()
   for (const field of DEPENDENCY_FIELDS) {
@@ -1002,9 +1088,7 @@ async function main () {
 
   const latestTag = getLatestTag()
 
-  const commits = getCommitsSince(latestTag).filter(
-    c => KNOWN_TYPES.has(c.type) && !(c.type === 'chore' && c.scope === 'deps'),
-  )
+  const commits = getCommitsSince(latestTag).filter(isReleaseWorthy)
 
   if (!commits.length) {
     console.log('No release-worthy commits since', latestTag?.name ?? 'repo root')
@@ -1051,40 +1135,10 @@ async function main () {
   // delete its branch.
   let seedPreamble: string | null = null
   if (!dryRun && process.env.GITHUB_TOKEN) {
-    const openReleasePRs = await gh<Array<{ number: number, body: string | null, head: { ref: string, repo: { full_name: string } | null }, base: { ref: string }, updated_at: string }>>(
-      `/repos/${repo.owner}/${repo.repo}/pulls?state=open&per_page=100&base=${encodeURIComponent(baseBranch)}&head=${repo.owner}:`,
-      { requireAuth: true },
-    )
-    const sameRepo = `${repo.owner}/${repo.repo}`
-    const stale = openReleasePRs
-      .filter(pr =>
-        pr.head.repo?.full_name === sameRepo
-        && (pr.head.ref.startsWith('release/v') || pr.head.ref === `release/${baseBranch}-pending`)
-        && pr.head.ref !== releaseBranch
-        && pr.base.ref === baseBranch,
-      )
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-    for (const pr of stale) {
-      console.log(`Closing superseded release PR #${pr.number} (${pr.head.ref})`)
-      const preamble = extractPreamble(pr.body)
-      if (preamble && !seedPreamble) seedPreamble = preamble
-      await gh(`/repos/${repo.owner}/${repo.repo}/pulls/${pr.number}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ state: 'closed' }),
-        requireAuth: true,
-      })
-      try {
-        await gh(`/repos/${repo.owner}/${repo.repo}/git/refs/heads/${pr.head.ref}`, {
-          method: 'DELETE',
-          requireAuth: true,
-        })
-      }
-      catch (err) {
-        console.warn(`  could not delete branch ${pr.head.ref}:`, err)
-      }
-    }
+    seedPreamble = await closeSupersededPRs(repo, baseBranch, headRef =>
+      (headRef.startsWith('release/v') || headRef === `release/${baseBranch}-pending`)
+      && headRef !== releaseBranch)
   }
-
 
   if (!dryRun) {
     const state = await getReleaseBranchState(repo, {
@@ -1128,10 +1182,7 @@ async function main () {
   const contributors = await getContributors(commits, repo, cutoff)
   const newContributors = contributors.filter(c => c.isFirstTime)
 
-  const existing = await gh<Array<{ number: number, body: string | null }>>(
-    `/repos/${repo.owner}/${repo.repo}/pulls?head=${repo.owner}:${releaseBranch}&state=open`,
-  )
-  const currentPR = existing[0]
+  const currentPR = await findOpenPR(repo, releaseBranch)
   const preamble = extractPreamble(currentPR?.body)
     || seedPreamble
     || `> v${newVersion} is the next ${bump} release.\n>\n> **Timetable**: to be announced.`
@@ -1164,30 +1215,7 @@ async function main () {
     return
   }
 
-  if (currentPR) {
-    await gh(`/repos/${repo.owner}/${repo.repo}/pulls/${currentPR.number}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ body }),
-      requireAuth: true,
-    })
-    console.log(`Updated PR #${currentPR.number}`)
-  } else {
-    const created = await gh<{ number: number, html_url: string }>(
-      `/repos/${repo.owner}/${repo.repo}/pulls`,
-      {
-        method: 'POST',
-        requireAuth: true,
-        body: JSON.stringify({
-          title: `v${newVersion}`,
-          head: releaseBranch,
-          base: baseBranch,
-          body,
-          draft: true,
-        }),
-      },
-    )
-    console.log(`Created PR #${created.number}: ${created.html_url}`)
-  }
+  await upsertReleasePR(repo, { currentPR, title: `v${newVersion}`, head: releaseBranch, base: baseBranch, body })
 }
 
 async function runIndependent (packagesInput: string): Promise<void> {
@@ -1213,9 +1241,7 @@ async function runIndependent (packagesInput: string): Promise<void> {
     }
   }
 
-  const commits = getCommitsSince(unionFrom).filter(
-    c => KNOWN_TYPES.has(c.type) && !(c.type === 'chore' && c.scope === 'deps'),
-  )
+  const commits = getCommitsSince(unionFrom).filter(isReleaseWorthy)
 
   const sinceSets = new Map<string, Set<string>>()
   const isCommitSince = (commit: Commit, tag: Tag): boolean => {
@@ -1271,37 +1297,7 @@ async function runIndependent (packagesInput: string): Promise<void> {
   // lift its preamble into the pending PR.
   let seedPreamble: string | null = null
   if (!dryRun && process.env.GITHUB_TOKEN) {
-    const openReleasePRs = await gh<Array<{ number: number, body: string | null, head: { ref: string, repo: { full_name: string } | null }, base: { ref: string }, updated_at: string }>>(
-      `/repos/${repo.owner}/${repo.repo}/pulls?state=open&per_page=100&base=${encodeURIComponent(baseBranch)}&head=${repo.owner}:`,
-      { requireAuth: true },
-    )
-    const sameRepo = `${repo.owner}/${repo.repo}`
-    const stale = openReleasePRs
-      .filter(pr =>
-        pr.head.repo?.full_name === sameRepo
-        && pr.head.ref.startsWith('release/v')
-        && pr.base.ref === baseBranch,
-      )
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-    for (const pr of stale) {
-      console.log(`Closing superseded release PR #${pr.number} (${pr.head.ref})`)
-      const preamble = extractPreamble(pr.body)
-      if (preamble && !seedPreamble) seedPreamble = preamble
-      await gh(`/repos/${repo.owner}/${repo.repo}/pulls/${pr.number}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ state: 'closed' }),
-        requireAuth: true,
-      })
-      try {
-        await gh(`/repos/${repo.owner}/${repo.repo}/git/refs/heads/${pr.head.ref}`, {
-          method: 'DELETE',
-          requireAuth: true,
-        })
-      }
-      catch (err) {
-        console.warn(`  could not delete branch ${pr.head.ref}:`, err)
-      }
-    }
+    seedPreamble = await closeSupersededPRs(repo, baseBranch, headRef => headRef.startsWith('release/v'))
   }
 
   if (!dryRun) {
@@ -1328,10 +1324,7 @@ async function runIndependent (packagesInput: string): Promise<void> {
   const cutoff = unionFrom ? git('log', '-1', '--format=%aI', unionFrom.ref) : null
   const contributors = await getContributors(uniqueCommits, repo, cutoff)
 
-  const existing = await gh<Array<{ number: number, body: string | null }>>(
-    `/repos/${repo.owner}/${repo.repo}/pulls?head=${repo.owner}:${releaseBranch}&state=open`,
-  )
-  const currentPR = existing[0]
+  const currentPR = await findOpenPR(repo, releaseBranch)
   const preamble = extractPreamble(currentPR?.body)
     || seedPreamble
     || `> The next set of package releases, covering all packages with unreleased changes.\n>\n> **Timetable**: to be announced.`
@@ -1350,30 +1343,7 @@ async function runIndependent (packagesInput: string): Promise<void> {
     return
   }
 
-  if (currentPR) {
-    await gh(`/repos/${repo.owner}/${repo.repo}/pulls/${currentPR.number}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ title, body }),
-      requireAuth: true,
-    })
-    console.log(`Updated PR #${currentPR.number}`)
-  } else {
-    const created = await gh<{ number: number, html_url: string }>(
-      `/repos/${repo.owner}/${repo.repo}/pulls`,
-      {
-        method: 'POST',
-        requireAuth: true,
-        body: JSON.stringify({
-          title,
-          head: releaseBranch,
-          base: baseBranch,
-          body,
-          draft: true,
-        }),
-      },
-    )
-    console.log(`Created PR #${created.number}: ${created.html_url}`)
-  }
+  await upsertReleasePR(repo, { currentPR, title, head: releaseBranch, base: baseBranch, body })
 }
 
 // Run as a script, not when imported by tests.
