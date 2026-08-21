@@ -8,11 +8,11 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "test:types": "tsgo --noEmit"
+    "test:types": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
-    "@typescript/native-preview": "7.0.0-dev.20260707.2",
+    "typescript": "7.0.2",
     "vitest": "4.1.10"
   },
   "packageManager": "pnpm@11.22.0"
