@@ -56,8 +56,48 @@ describe('incVersion', () => {
     expect(incVersion('0.0.3', 'patch')).toBe('0.0.4')
   })
 
-  it('throws on a prerelease version', () => {
-    expect(() => incVersion('1.2.3-rc.1', 'patch')).toThrowError(/strict "X\.Y\.Z" semver/)
+  it('graduates a bare-number prerelease regardless of bump level', () => {
+    expect(incVersion('5.0.0-0', 'patch')).toBe('5.0.0')
+    expect(incVersion('5.0.0-0', 'minor')).toBe('5.0.0')
+    expect(incVersion('5.0.0-0', 'major')).toBe('5.0.0')
+  })
+
+  it('graduates a dotted-identifier prerelease', () => {
+    expect(incVersion('5.0.0-beta.3', 'patch')).toBe('5.0.0')
+    expect(incVersion('1.2.3-rc.1', 'major')).toBe('1.2.3')
+  })
+
+  it('cuts a new prerelease line from a stable version', () => {
+    expect(incVersion('4.5.2', 'major', 'beta')).toBe('5.0.0-beta.0')
+    expect(incVersion('4.5.2', 'minor', 'rc')).toBe('4.6.0-rc.0')
+  })
+
+  it('increments the counter when the identifier matches', () => {
+    expect(incVersion('5.0.0-beta.0', 'major', 'beta')).toBe('5.0.0-beta.1')
+    expect(incVersion('5.0.0-beta.3', 'patch', 'beta')).toBe('5.0.0-beta.4')
+  })
+
+  it('resets the counter when the identifier changes', () => {
+    expect(incVersion('5.0.0-beta.3', 'major', 'rc')).toBe('5.0.0-rc.0')
+    expect(incVersion('5.0.0-0', 'patch', 'beta')).toBe('5.0.0-beta.0')
+  })
+
+  it('supports bare-number prereleases', () => {
+    expect(incVersion('4.5.2', 'major', '0')).toBe('5.0.0-0')
+    expect(incVersion('5.0.0-0', 'major', '0')).toBe('5.0.0-1')
+    expect(incVersion('5.0.0-beta.3', 'patch', '0')).toBe('5.0.0-0')
+  })
+
+  it('treats a bare-number identifier as a style selector, starting new lines at 0', () => {
+    expect(incVersion('4.5.2', 'major', '3')).toBe('5.0.0-0')
+    expect(incVersion('5.0.0-beta.3', 'patch', '7')).toBe('5.0.0-0')
+  })
+
+  it('rejects unsafe prerelease identifiers', () => {
+    expect(() => incVersion('4.5.2', 'patch', '--upload-pack=x')).toThrowError(/Invalid prerelease identifier/)
+    expect(() => incVersion('4.5.2', 'patch', 'beta bang')).toThrowError(/Invalid prerelease identifier/)
+    expect(() => incVersion('4.5.2', 'patch', 'BETA')).toThrowError(/Invalid prerelease identifier/)
+    expect(() => incVersion('4.5.2', 'patch', '')).toThrowError(/Invalid prerelease identifier/)
   })
 
   it('throws on a version with build metadata', () => {

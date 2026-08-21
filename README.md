@@ -142,6 +142,7 @@ Whenever you push to the default branch, this action parses conventional commits
 | `checkout` | `true` | Set to `false` if the caller has already checked out with `fetch-depth: 0`. |
 | `packages` | _(unset)_ | Newline-separated list of publishable workspace directories (paths or globs, e.g. `packages/*`). When set, uppt operates in monorepo lockstep mode. See [Monorepo support](#monorepo-support). |
 | `allow-forks` | `false` | Whether to run when the repository is a fork. By default the action skips (with a notice) so forks don't open release PRs of their own. |
+| `prerelease` | _(unset)_ | One-shot prerelease identifier (`beta`, `rc`, or a bare number like `0`). From a stable version the normal bump is applied and the identifier attached at counter 0 (`4.5.2` → `5.0.0-beta.0`); from a prerelease with the same identifier the counter increments (`5.0.0-beta.0` → `5.0.0-beta.1`). When unset, a prerelease version graduates to its stable version (`5.0.0-beta.1` → `5.0.0`). |
 
 ### Creates a release (`danielroe/uppt/release`)
 

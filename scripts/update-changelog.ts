@@ -16,6 +16,9 @@
 //   PACKAGES           newline-separated list of publishable workspace
 //                      paths/globs; when set, the release bumps every
 //                      resolved workspace's package.json in lockstep
+//   PRERELEASE         one-shot prerelease identifier (e.g. "beta", "rc",
+//                      "0"); when set, the release cuts or continues a
+//                      prerelease instead of a stable version
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
@@ -167,29 +170,65 @@ function determineBump (commits: Commit[]): 'major' | 'minor' | 'patch' {
   return 'patch'
 }
 
-export function incVersion (version: string, bump: 'major' | 'minor' | 'patch'): string {
-  // uppt does not (yet) model prerelease or build-metadata releases.
-  // Silently rolling `1.2.3-rc.1` forward to `1.2.4` would lose the
-  // prerelease line, which is almost never what a maintainer wants.
-  // Refuse and let them reconcile.
-  const match = version.match(/^(\d+)\.(\d+)\.(\d+)$/)
+export function incVersion (version: string, bump: 'major' | 'minor' | 'patch', prerelease?: string): string {
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9a-zA-Z.-]+))?$/)
   if (!match) {
     throw new Error(
-      `Cannot bump version "${version}": expected strict "X.Y.Z" semver. uppt does not currently support prerelease or build-metadata versions.`,
+      `Cannot bump version "${version}": expected strict "X.Y.Z" semver, optionally with a prerelease suffix. uppt does not support build-metadata versions.`,
     )
   }
 
-  let [, x, y, z] = match.map(Number) as [number, number, number, number, number]
+  let [x, y, z] = match.slice(1, 4).map(Number) as [number, number, number]
+  const currentPre = match[4]
 
-  if (x === 0) {
-    if (bump === 'major') { bump = 'minor' }
-    else if (bump === 'minor') { bump = 'patch' }
+  const bumpBase = () => {
+    if (x === 0) {
+      if (bump === 'major') { bump = 'minor' }
+      else if (bump === 'minor') { bump = 'patch' }
+    }
+    if (bump === 'major') { x += 1; y = 0; z = 0 }
+    else if (bump === 'minor') { y += 1; z = 0 }
+    else { z += 1 }
   }
 
-  if (bump === 'major') { x += 1; y = 0; z = 0 }
-  else if (bump === 'minor') { y += 1; z = 0 }
-  else { z += 1 }
-  return `${x}.${y}.${z}`
+  if (prerelease === undefined) {
+    // A prerelease already reserved its target version, so graduating it
+    // drops the suffix without a further bump: `feat:` on `5.0.0-0` must
+    // produce `5.0.0`, not `5.1.0`.
+    if (currentPre === undefined) bumpBase()
+    return `${x}.${y}.${z}`
+  }
+
+  // The identifier flows into branch/ref names and, downstream, gh argv;
+  // pin it to a safe alphabet to rule out flag injection and ref confusion.
+  if (!/^[a-z0-9][a-z0-9.-]*$/.test(prerelease)) {
+    throw new Error(
+      `Invalid prerelease identifier "${prerelease}": expected lowercase alphanumerics, "." or "-" after the first character (e.g. "beta", "rc", "0").`,
+    )
+  }
+
+  const isBareNumber = /^\d+$/.test(prerelease)
+
+  if (currentPre === undefined) {
+    bumpBase()
+    return isBareNumber ? `${x}.${y}.${z}-0` : `${x}.${y}.${z}-${prerelease}.0`
+  }
+
+  // A bare-number identifier is a style selector for the `-N` form, not a
+  // counter seed: new lines always start at 0.
+  if (isBareNumber) {
+    return /^\d+$/.test(currentPre)
+      ? `${x}.${y}.${z}-${Number(currentPre) + 1}`
+      : `${x}.${y}.${z}-0`
+  }
+
+  const dot = currentPre.lastIndexOf('.')
+  const head = dot === -1 ? currentPre : currentPre.slice(0, dot)
+  const tail = dot === -1 ? '' : currentPre.slice(dot + 1)
+  if (head === prerelease && /^\d+$/.test(tail)) {
+    return `${x}.${y}.${z}-${prerelease}.${Number(tail) + 1}`
+  }
+  return `${x}.${y}.${z}-${prerelease}.0`
 }
 
 function formatChangelog (
@@ -521,7 +560,8 @@ async function main () {
   const currentVersion = resolveCurrentVersion(process.cwd(), packagesInput)
 
   const bump = determineBump(commits)
-  const newVersion = incVersion(currentVersion, bump)
+  const prerelease = process.env.PRERELEASE?.trim() || undefined
+  const newVersion = incVersion(currentVersion, bump, prerelease)
   const releaseBranch = `release/v${newVersion}`
 
   const changelog = formatChangelog(commits, {

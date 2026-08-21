@@ -27,6 +27,10 @@ inputs:
     description: 'Newline-separated list of publishable workspace directories, relative to the repo root. Each line is a path or glob (e.g. `packages/*`); `!`-prefixed entries are excluded; workspaces with `"private": true` are skipped. Omit for single-package repos.'
     required: false
     default: ''
+  prerelease:
+    description: 'One-shot prerelease identifier (e.g. `beta`, `rc`, or a bare number like `0`). When set, this run cuts or continues a prerelease: from a stable version the normal bump is applied and the identifier attached at counter 0 (`4.5.2` → `5.0.0-beta.0`); from a prerelease with the same identifier the counter increments (`5.0.0-beta.0` → `5.0.0-beta.1`). Omit for normal releases; a prerelease version with this unset graduates to its stable version.'
+    required: false
+    default: ''
   allow-forks:
     description: 'Whether to run when the repository is a fork. Defaults to `false` so a fork of a repo using uppt does not open release PRs of its own.'
     required: false
@@ -76,4 +80,5 @@ runs:
         GITHUB_TOKEN: ${{ inputs.token }}
         RELEASE_BASE: ${{ inputs.base-branch }}
         PACKAGES: ${{ inputs.packages }}
+        PRERELEASE: ${{ inputs.prerelease }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/update-changelog.ts
