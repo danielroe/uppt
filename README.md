@@ -188,6 +188,7 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | Input | Default | Description |
 | --- | --- | --- |
 | `npm-access` | `public` | npm access level (`public` or `restricted`). |
+| `npm-tag` | _(derived)_ | npm dist-tag override for every tarball. By default stable versions publish to `latest`, prereleases to their identifier (`5.0.0-beta.0` → `beta`), and bare-numeric prereleases (`5.0.0-0`) to `next`. |
 | `files` | _(scan artifact)_ | JSON array of tarball filenames, as emitted by `uppt/pack`. When omitted, every `*.tgz` in the artifact is published. |
 | `releases` | _(unset)_ | Independent-mode publish payload. Never set by hand. |
 </details>
@@ -209,6 +210,8 @@ gh workflow run release.yml -f prerelease=beta
 ```
 
 From `4.5.2`, if there's been a breaking change this will open a PR for `5.0.0-beta.0`. Running it again will produce `5.0.0-beta.1`. A different identifier will reset the counter (`5.0.0-rc.0`), or a bare number produces the `5.0.0-0` style. It's one-shot: the next ordinary push opens a PR for a stable release (e.g. `5.0.0`) instead.
+
+Prereleases don't take the `latest` dist-tag: `uppt/publish` derives the tag from the version being published, so `5.0.0-beta.0` is staged as `beta`, `5.0.0-rc.1` as `rc`, and `5.0.0-0` as `next` (a bare number has no name to use). Set `npm-tag` on `uppt/publish` to override; it's also required if a tarball's filename carries no parseable version, as uppt fails rather than defaulting to `latest`.
 
 ## Monorepo support
 

@@ -15,6 +15,10 @@ inputs:
     description: 'npm access level (`public` or `restricted`).'
     required: false
     default: 'public'
+  npm-tag:
+    description: 'Optional npm dist-tag override applied to every tarball. By default the tag is derived from each tarball''s version: stable versions publish to `latest`, prereleases to their identifier (`5.0.0-beta.0` → `beta`, `5.0.0-rc.1` → `rc`), and prereleases with a bare numeric identifier (`5.0.0-0`) to `next`. Required when a tarball filename carries no parseable version, since uppt refuses to guess.'
+    required: false
+    default: ''
   files:
     description: 'Optional JSON array of tarball filenames to publish, as emitted by `uppt/pack`''s `files` output. When omitted, the action publishes every `*.tgz` it finds in the downloaded artifact.'
     required: false
@@ -72,6 +76,7 @@ runs:
       shell: bash
       env:
         NPM_ACCESS: ${{ inputs.npm-access }}
+        NPM_TAG: ${{ inputs.npm-tag }}
         TARBALL_DIR: ${{ runner.temp }}/uppt-tarballs
         TARBALL_FILES: ${{ inputs.files }}
         RELEASES: ${{ inputs.releases }}

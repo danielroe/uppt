@@ -36,7 +36,7 @@ inputs:
     required: false
     default: ''
   prerelease:
-    description: 'One-shot prerelease identifier (e.g. `beta`, `rc`, or a bare number like `0`). When set, this run cuts or continues a prerelease: from a stable version the normal bump is applied and the identifier attached at counter 0 (`4.5.2` → `5.0.0-beta.0`); from a prerelease with the same identifier the counter increments (`5.0.0-beta.0` → `5.0.0-beta.1`). Omit for normal releases; a prerelease version with this unset graduates to its stable version.'
+    description: 'One-shot prerelease identifier (e.g. `beta`, `rc`, or a bare number like `0`). When set, this run cuts or continues a prerelease: from a stable version the normal bump is applied and the identifier attached at counter 0 (`4.5.2` → `5.0.0-beta.0`); from a prerelease with the same identifier the counter increments (`5.0.0-beta.0` → `5.0.0-beta.1`). Omit for normal releases; a prerelease version with this unset graduates to its stable version. `uppt/publish` stages prereleases under a matching dist-tag (`beta`, `rc`, `next` for a bare number) so `latest` is never moved to them.'
     required: false
     default: ''
   allow-forks:
