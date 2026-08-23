@@ -72,7 +72,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: danielroe/uppt/pr@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
+      - uses: danielroe/uppt/pr@f14ff83b5a34984ecad7ce0ca911e83b6b80e3b0 # v0.6.5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: ${{ inputs.prerelease }}
@@ -93,7 +93,7 @@ jobs:
       contents: write
       actions: write
     steps:
-      - uses: danielroe/uppt/release@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
+      - uses: danielroe/uppt/release@f14ff83b5a34984ecad7ce0ca911e83b6b80e3b0 # v0.6.5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -109,7 +109,7 @@ jobs:
       files: ${{ steps.pack.outputs.files }}
     steps:
       - id: pack
-        uses: danielroe/uppt/pack@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
+        uses: danielroe/uppt/pack@f14ff83b5a34984ecad7ce0ca911e83b6b80e3b0 # v0.6.5
 
   # stage the prebuilt tarball(s) to npm via OIDC
   publish:
@@ -126,7 +126,7 @@ jobs:
       id-token: write
     environment: npm
     steps:
-      - uses: danielroe/uppt/publish@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
+      - uses: danielroe/uppt/publish@f14ff83b5a34984ecad7ce0ca911e83b6b80e3b0 # v0.6.5
         with:
           files: ${{ needs.pack.outputs.files }}
 ```
@@ -293,7 +293,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: danielroe/uppt/pr@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
+      - uses: danielroe/uppt/pr@f14ff83b5a34984ecad7ce0ca911e83b6b80e3b0 # v0.6.5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: ${{ inputs.prerelease }}
@@ -316,7 +316,7 @@ jobs:
       contents: write
       actions: write
     steps:
-      - uses: danielroe/uppt/release@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
+      - uses: danielroe/uppt/release@f14ff83b5a34984ecad7ce0ca911e83b6b80e3b0 # v0.6.5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           mode: independent
@@ -336,7 +336,7 @@ jobs:
       files: ${{ steps.pack.outputs.files }}
     steps:
       - id: pack
-        uses: danielroe/uppt/pack@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
+        uses: danielroe/uppt/pack@f14ff83b5a34984ecad7ce0ca911e83b6b80e3b0 # v0.6.5
         with:
           releases: ${{ inputs.releases }}
           packages: |
@@ -356,7 +356,7 @@ jobs:
       id-token: write
     environment: npm
     steps:
-      - uses: danielroe/uppt/publish@91974ad6e7fd9fd91ce562b0d371eeaceedb1f49 # v0.6.4
+      - uses: danielroe/uppt/publish@f14ff83b5a34984ecad7ce0ca911e83b6b80e3b0 # v0.6.5
         with:
           files: ${{ needs.pack.outputs.files }}
           releases: ${{ inputs.releases }}
