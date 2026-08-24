@@ -143,7 +143,7 @@ function route (method: string, path: string, body: unknown): { status: number, 
       api.branches.set(rest.slice('/git/refs/heads/'.length), (body as { sha: string }).sha)
       return { status: 200, body: {} }
     }
-    if (method === 'DELETE') return { status: 204, body: {} }
+    if (method === 'DELETE') return { status: 204, body: undefined }
   }
   if (method === 'GET' && rest.startsWith('/compare/')) {
     const cmp = api.compares.get(decodeURIComponent(rest.slice('/compare/'.length)))
@@ -170,7 +170,7 @@ function stubFetch () {
       ok: status >= 200 && status < 300,
       status,
       statusText: '',
-      text: () => Promise.resolve(JSON.stringify(payload)),
+      text: () => Promise.resolve(payload === undefined ? '' : JSON.stringify(payload)),
       json: () => Promise.resolve(payload),
     })
   }))
@@ -345,6 +345,46 @@ describe('lockstep main', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     await main()
     expect(warn).toHaveBeenCalled()
+  })
+
+  it('leaves an open prerelease PR alone on an ordinary run', async () => {
+    api.openPRs = [{
+      number: 3,
+      body: null,
+      head: { ref: 'release/v2.0.0-beta.0', repo: { full_name: 'owner/repo' } },
+      base: { ref: 'main' },
+      updated_at: '2024-01-02T00:00:00Z',
+    }]
+    await main()
+    expect(calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/pulls/3'))).toEqual([])
+  })
+
+  it('leaves an open stable PR alone on a prerelease run', async () => {
+    process.env.PRERELEASE = 'beta'
+    api.openPRs = [{
+      number: 3,
+      body: null,
+      head: { ref: 'release/v1.3.0', repo: { full_name: 'owner/repo' } },
+      base: { ref: 'main' },
+      updated_at: '2024-01-02T00:00:00Z',
+    }]
+    await main()
+    expect(calls.filter(c => c.method === 'PATCH' && c.path.endsWith('/pulls/3'))).toEqual([])
+  })
+
+  it('closes a superseded prerelease PR on a prerelease run', async () => {
+    process.env.PRERELEASE = 'beta'
+    api.openPRs = [{
+      number: 3,
+      body: null,
+      head: { ref: 'release/v1.3.0-rc.0', repo: { full_name: 'owner/repo' } },
+      base: { ref: 'main' },
+      updated_at: '2024-01-02T00:00:00Z',
+    }]
+    await main()
+    expect(calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: 'PATCH', path: '/repos/owner/repo/pulls/3', body: { state: 'closed' } }),
+    ]))
   })
 
   it('ignores open PRs from forks, other bases, and non-release branches', async () => {

@@ -209,7 +209,7 @@ To cut a prerelease, run the release workflow from your default branch with the 
 gh workflow run release.yml -f prerelease=beta
 ```
 
-From `4.5.2`, if there's been a breaking change this will open a PR for `5.0.0-beta.0`. Running it again will produce `5.0.0-beta.1`. A different identifier will reset the counter (`5.0.0-rc.0`), or a bare number produces the `5.0.0-0` style. It's one-shot: the next ordinary push opens a PR for a stable release (e.g. `5.0.0`) instead.
+From `4.5.2`, if there's been a breaking change this will open a PR for `5.0.0-beta.0`. Running it again will produce `5.0.0-beta.1`. A different identifier will reset the counter (`5.0.0-rc.0`), or a bare number produces the `5.0.0-0` style. It's one-shot: the next ordinary push opens a separate PR for a stable release (e.g. `5.0.0`). Prerelease and stable release PRs are tracked independently, so an ordinary push won't close an open prerelease PR.
 
 Prereleases don't take the `latest` dist-tag: `uppt/publish` derives the tag from the version being published, so `5.0.0-beta.0` is staged as `beta`, `5.0.0-rc.1` as `rc`, and `5.0.0-0` as `next` (a bare number has no name to use). Set `npm-tag` on `uppt/publish` to override; it's also required if a tarball's filename carries no parseable version, as uppt fails rather than defaulting to `latest`.
 

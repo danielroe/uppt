@@ -476,7 +476,8 @@ async function gh<T> (path: string, rest: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     throw new Error(`GitHub ${rest.method || 'GET'} ${path} -> ${res.status} ${res.statusText}: ${await res.text()}`)
   }
-  return res.json() as Promise<T>
+  const text = await res.text()
+  return (text ? JSON.parse(text) : undefined) as T
 }
 
 async function getContributors (
@@ -565,6 +566,24 @@ async function closeSupersededPRs (
     }
   }
   return seedPreamble
+}
+
+/**
+ * Whether an open release PR's head branch is superseded by the branch this
+ * run is building. Prerelease and stable targets are separate tracks: a
+ * `release/v5.0.0-beta.0` PR must survive the next ordinary push (which
+ * targets `release/v5.0.0`), and vice versa.
+ */
+export function isSupersededReleaseBranch (headRef: string, opts: {
+  releaseBranch: string
+  baseBranch: string
+  prerelease: boolean
+}): boolean {
+  if (headRef === opts.releaseBranch) return false
+  if (headRef === `release/${opts.baseBranch}-pending`) return true
+  if (!headRef.startsWith('release/v')) return false
+  const isPrereleaseBranch = headRef.slice('release/v'.length).includes('-')
+  return isPrereleaseBranch === opts.prerelease
 }
 
 async function findOpenPR (
@@ -1124,12 +1143,12 @@ export async function main () {
   // single-branch case: a patch PR (`release/v1.0.1`) gets superseded by a
   // `feat:` that bumps the target to `release/v1.1.0`. We close the stale PR,
   // lift its preamble (so the maintainer's intro text isn't lost), and
-  // delete its branch.
+  // delete its branch. Prerelease PRs are a separate track and survive
+  // stable runs (and vice versa).
   let seedPreamble: string | null = null
   if (!dryRun && process.env.GITHUB_TOKEN) {
     seedPreamble = await closeSupersededPRs(repo, baseBranch, headRef =>
-      (headRef.startsWith('release/v') || headRef === `release/${baseBranch}-pending`)
-      && headRef !== releaseBranch)
+      isSupersededReleaseBranch(headRef, { releaseBranch, baseBranch, prerelease: Boolean(prerelease) }))
   }
 
   if (!dryRun) {
