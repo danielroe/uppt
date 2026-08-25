@@ -75,8 +75,10 @@ const KNOWN_TYPES = new Set(Object.keys(TYPE_TITLES))
 const isReleaseWorthy = (c: Commit) =>
   KNOWN_TYPES.has(c.type) && !(c.type === 'chore' && c.scope === 'deps')
 
+const MAX_BUFFER = 256 * 1024 * 1024
+
 const git = (...args: string[]) =>
-  execFileSync('git', args, { encoding: 'utf8' }).trim()
+  execFileSync('git', args, { encoding: 'utf8', maxBuffer: MAX_BUFFER }).trim()
 
 function getRepo (): { owner: string, repo: string } {
   const env = process.env.GITHUB_REPOSITORY
@@ -101,7 +103,7 @@ export function getAllTags (): string[] {
     return execFileSync(
       'git',
       ['for-each-ref', '--sort=-creatordate', '--format=%(refname:strip=2)', 'refs/tags'],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', maxBuffer: MAX_BUFFER },
     ).split('\n').map(s => s.trim()).filter(Boolean)
   } catch {
     return []
@@ -225,7 +227,7 @@ function getCommitsSince (tag: Tag | null): Commit[] {
   const stdout = execFileSync(
     'git',
     ['log', range, `--pretty=format:%H%x1f%h%x1f%an%x1f%ae%x1f%s%x1f%b%x1e`],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', maxBuffer: MAX_BUFFER },
   )
   return stdout
     .split('\x1e')

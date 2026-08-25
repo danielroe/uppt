@@ -31,8 +31,10 @@ function run (cmd: string, args: string[], opts: { env?: NodeJS.ProcessEnv } = {
   execFileSync(cmd, args, { stdio: 'inherit', env: { ...process.env, ...opts.env } })
 }
 
+const MAX_BUFFER = 256 * 1024 * 1024
+
 function capture (cmd: string, args: string[], env?: NodeJS.ProcessEnv): string {
-  return execFileSync(cmd, args, { encoding: 'utf8', env: { ...process.env, ...env } }).trim()
+  return execFileSync(cmd, args, { encoding: 'utf8', maxBuffer: MAX_BUFFER, env: { ...process.env, ...env } }).trim()
 }
 
 function tagExists (repo: string, tag: string, env: NodeJS.ProcessEnv): boolean {
@@ -43,7 +45,7 @@ function tagExists (repo: string, tag: string, env: NodeJS.ProcessEnv): boolean 
     const out = execFileSync(
       'gh',
       ['api', '-H', 'Accept: application/vnd.github+json', `/repos/${repo}/git/ref/tags/${tag}`],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } },
+      { encoding: 'utf8', maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } },
     )
     return Boolean(out.trim())
   } catch {
