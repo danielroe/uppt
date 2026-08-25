@@ -222,6 +222,33 @@ function parseCommit (raw: string): Commit | null {
   }
 }
 
+/**
+ * Drop commits whose subject already appears on the other side of a
+ * diverged range. The previous release tag is not always an ancestor of
+ * HEAD (a `4.x` maintenance line tagged after `main` moved on to `5.0`),
+ * so `tag..HEAD` includes everything since the branches diverged, most of
+ * which shipped already as cherry-picks. Subjects are matched exactly:
+ * a cherry-pick keeps its subject but not its hash or patch id.
+ */
+export function dropAlreadyReleased (commits: Commit[], releasedSubjects: Set<string>): Commit[] {
+  if (releasedSubjects.size === 0) return commits
+  return commits.filter(c => !releasedSubjects.has(c.message))
+}
+
+/** Subjects of commits reachable from `ref` but not from HEAD. */
+function subjectsOnlyOn (ref: string): Set<string> {
+  try {
+    const stdout = execFileSync(
+      'git',
+      ['log', `HEAD..${ref}`, '--pretty=format:%s'],
+      { encoding: 'utf8', maxBuffer: MAX_BUFFER },
+    )
+    return new Set(stdout.split('\n').map(s => s.trim()).filter(Boolean))
+  } catch {
+    return new Set()
+  }
+}
+
 function getCommitsSince (tag: Tag | null): Commit[] {
   const range = tag ? `${tag.ref}..HEAD` : 'HEAD'
   const stdout = execFileSync(
@@ -229,12 +256,14 @@ function getCommitsSince (tag: Tag | null): Commit[] {
     ['log', range, `--pretty=format:%H%x1f%h%x1f%an%x1f%ae%x1f%s%x1f%b%x1e`],
     { encoding: 'utf8', maxBuffer: MAX_BUFFER },
   )
-  return stdout
+  const commits = stdout
     .split('\x1e')
     .map(s => s.replace(/^\n/, ''))
     .filter(Boolean)
     .map(parseCommit)
     .filter((c): c is Commit => c !== null)
+
+  return tag ? dropAlreadyReleased(commits, subjectsOnlyOn(tag.ref)) : commits
 }
 
 export function determineBump (commits: Commit[]): BumpLevel {

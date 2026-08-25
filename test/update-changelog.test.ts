@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { buildBumpFileSet, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, truncateBody, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
+import { buildBumpFileSet, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, truncateBody, dropAlreadyReleased, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
 import { resolveWorkspaces } from '../scripts/_workspaces.ts'
 
 let tmp: string
@@ -512,6 +512,30 @@ describe('extractPreamble', () => {
 
   it('returns the whole body when no generated heading exists', () => {
     expect(extractPreamble('> just a note')).toBe('> just a note')
+  })
+})
+
+describe('dropAlreadyReleased', () => {
+  const commit = (message: string): Commit => ({
+    hash: message,
+    shortHash: message.slice(0, 7),
+    message,
+    type: 'fix',
+    scope: '',
+    description: message,
+    isBreaking: false,
+    author: { name: 'a', email: 'a@b.c' },
+    references: [],
+  })
+
+  it('omits commits whose subject shipped on the diverged branch', () => {
+    const commits = [commit('fix: a (#1)'), commit('fix: b (#2)')]
+    expect(dropAlreadyReleased(commits, new Set(['fix: a (#1)'])).map(c => c.message)).toEqual(['fix: b (#2)'])
+  })
+
+  it('is a no-op without diverged subjects', () => {
+    const commits = [commit('fix: a')]
+    expect(dropAlreadyReleased(commits, new Set())).toBe(commits)
   })
 })
 
