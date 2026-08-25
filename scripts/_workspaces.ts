@@ -178,6 +178,11 @@ export function isSemver (value: string): boolean {
   return /^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(value)
 }
 
+/** Whether a semver version carries a prerelease suffix (`1.0.0-beta.0`). */
+export function isPrerelease (version: string): boolean {
+  return /^\d+\.\d+\.\d+-/.test(version)
+}
+
 /**
  * Resolve the version uppt should act on, the single place both `uppt/pr`
  * (bump source) and `uppt/release` (tag source) agree on so they can never

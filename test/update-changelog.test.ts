@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { buildBumpFileSet, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, type Commit } from '../scripts/update-changelog.ts'
+import { buildBumpFileSet, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
 import { resolveWorkspaces } from '../scripts/_workspaces.ts'
 
 let tmp: string
@@ -851,5 +851,33 @@ describe('releaseBranchDrift', () => {
       divergence: { ...inSync.divergence, behindBy: 3 },
       baseTouched: ['packages/a/package.json'],
     })).toBe('base has since changed packages/a/package.json')
+  })
+})
+
+describe('isSupersededReleaseBranch', () => {
+  const opts = { releaseBranch: 'release/v5.0.0', baseBranch: 'main', prerelease: false }
+
+  it('keeps the branch this run is building', () => {
+    expect(isSupersededReleaseBranch('release/v5.0.0', opts)).toBe(false)
+  })
+
+  it('supersedes the pending seed branch', () => {
+    expect(isSupersededReleaseBranch('release/main-pending', opts)).toBe(true)
+  })
+
+  it('ignores branches that are not release branches', () => {
+    expect(isSupersededReleaseBranch('feat/whatever', opts)).toBe(false)
+  })
+
+  it('supersedes another stable release branch', () => {
+    expect(isSupersededReleaseBranch('release/v4.9.0', opts)).toBe(true)
+  })
+
+  it('keeps a prerelease branch when building a stable release', () => {
+    expect(isSupersededReleaseBranch('release/v5.0.0-beta.0', opts)).toBe(false)
+  })
+
+  it('supersedes a prerelease branch when building a prerelease', () => {
+    expect(isSupersededReleaseBranch('release/v5.0.0-beta.0', { ...opts, releaseBranch: 'release/v5.0.0-beta.1', prerelease: true })).toBe(true)
   })
 })

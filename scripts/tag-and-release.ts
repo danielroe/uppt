@@ -23,7 +23,7 @@
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
 import { runMain } from './_cli.ts'
-import { isSemver, resolveCurrentVersion, resolveWorkspaces } from './_workspaces.ts'
+import { isPrerelease, isSemver, resolveCurrentVersion, resolveWorkspaces } from './_workspaces.ts'
 import { coordinationTag, deriveReleaseSet, packageTag, releaseTitle, serialiseReleases } from './_independent.ts'
 import { getAllTags } from './update-changelog.ts'
 
@@ -101,7 +101,10 @@ function mainIndependent (repo: string, ghEnv: NodeJS.ProcessEnv) {
   }
 
   const body = process.env.PR_BODY ?? ''
-  run('gh', ['release', 'create', coordTag, '--title', releaseTitle(releases), '--notes', body], { env: ghEnv })
+  // Only mark the coordination release as a prerelease when nothing stable
+  // ships alongside; a mixed set still deserves to be the latest release.
+  const prereleaseFlag = releases.every(release => isPrerelease(release.version)) ? ['--prerelease'] : []
+  run('gh', ['release', 'create', coordTag, '--title', releaseTitle(releases), '--notes', body, ...prereleaseFlag], { env: ghEnv })
 
   const workflow = process.env.PUBLISH_WORKFLOW || 'release.yml'
   run('gh', ['workflow', 'run', workflow, '--ref', coordTag, '-f', `releases=${serialiseReleases(releases)}`], { env: ghEnv })
@@ -141,7 +144,7 @@ export function main () {
   createTag(repo, tag, sha, ghEnv)
 
   const body = process.env.PR_BODY ?? ''
-  run('gh', ['release', 'create', tag, '--title', tag, '--notes', body], { env: ghEnv })
+  run('gh', ['release', 'create', tag, '--title', tag, '--notes', body, ...(isPrerelease(version) ? ['--prerelease'] : [])], { env: ghEnv })
 
   const workflow = process.env.PUBLISH_WORKFLOW || 'release.yml'
   run('gh', ['workflow', 'run', workflow, '--ref', tag], { env: ghEnv })

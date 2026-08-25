@@ -101,6 +101,12 @@ describe('tag-and-release', () => {
     expect(ghCalls().at(-1)).toEqual(['workflow', 'run', 'publish.yml', '--ref', 'v1.2.3'])
   })
 
+  it('marks a prerelease version as a prerelease', () => {
+    writePkg(root, { name: 'root-pkg', version: '1.2.3-beta.0' })
+    main()
+    expect(ghCalls().at(-2)).toEqual(['release', 'create', 'v1.2.3-beta.0', '--title', 'v1.2.3-beta.0', '--notes', '', '--prerelease'])
+  })
+
   it('refuses to retag an existing version', () => {
     existingTags = ['v1.2.3']
     expect(() => main()).toThrow(/already exists on owner\/repo/)
@@ -139,6 +145,19 @@ describe('tag-and-release', () => {
         'workflow', 'run', 'release.yml', '--ref', 'release-2024-05-01',
         '-f', 'releases=[{"name":"@nuxt/kit","version":"5.0.0","dir":"packages/kit"}]',
       ])
+    })
+
+    it('marks the release as a prerelease when every released package is a prerelease', () => {
+      writePkg(resolve(root, 'packages/kit'), { name: '@nuxt/kit', version: '5.0.0-beta.0' })
+      main()
+      expect(ghCalls().at(-2)).toContain('--prerelease')
+    })
+
+    it('does not mark the release as a prerelease when a stable package ships alongside', () => {
+      writePkg(resolve(root, 'packages/kit'), { name: '@nuxt/kit', version: '5.0.0-beta.0' })
+      writePkg(resolve(root, 'packages/ui'), { name: '@nuxt/ui', version: '2.0.1' })
+      main()
+      expect(ghCalls().at(-2)).not.toContain('--prerelease')
     })
 
     it('suffixes the coordination tag when the date is taken', () => {
