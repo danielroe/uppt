@@ -50,6 +50,10 @@ on:
         description: 'Cut a prerelease instead of a normal release, e.g. `beta`, `rc`, or `0`'
         required: false
         default: ''
+      npm-tag:
+        description: 'npm dist-tag to publish to. Set by uppt/release for maintenance lines; leave blank otherwise'
+        required: false
+        default: ''
 
 permissions: {}
 
@@ -129,6 +133,7 @@ jobs:
       - uses: danielroe/uppt/publish@775bb233d2c5671b2c12d48f822778aae8231376 # v0.6.7
         with:
           files: ${{ needs.pack.outputs.files }}
+          npm-tag: ${{ inputs.npm-tag }}
 ```
 
 ## How it works
@@ -165,6 +170,7 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | `token` | `${{ github.token }}` | Needs `contents: write` and `actions: write`. |
 | `publish-workflow` | `release.yml` | Workflow filename to dispatch after tagging. Must declare `workflow_dispatch`. |
 | `mode` | `lockstep` | `lockstep` or `independent`. Must match `uppt/pr`. See [Independent versioning](#independent-versioning-experimental). |
+| `npm-tag` | _(derived)_ | npm dist-tag override, passed on to the publish workflow. Derived as `<major>x` for a release merged into a non-default branch. See [Maintenance releases](#maintenance-releases). |
 | `allow-forks` | `false` | By default the action skips on forks so they don't tag or publish releases of their own. |
 </details>
 
@@ -188,7 +194,7 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | Input | Default | Description |
 | --- | --- | --- |
 | `npm-access` | `public` | npm access level (`public` or `restricted`). |
-| `npm-tag` | _(derived)_ | npm dist-tag override for every tarball. By default stable versions publish to `latest`, prereleases to their identifier (`5.0.0-beta.0` → `beta`), and bare-numeric prereleases (`5.0.0-0`) to `next`. |
+| `npm-tag` | _(derived)_ | npm dist-tag override for every tarball. By default stable versions publish to `latest`, prereleases to their identifier (`5.0.0-beta.0` → `beta`), bare-numeric prereleases (`5.0.0-0`) to `next`, and maintenance releases to `<major>x` (see [Maintenance releases](#maintenance-releases)). |
 | `files` | _(scan artifact)_ | JSON array of tarball filenames, as emitted by `uppt/pack`. When omitted, every `*.tgz` in the artifact is published. |
 | `releases` | _(unset)_ | Independent-mode publish payload. Never set by hand. |
 </details>
@@ -212,6 +218,22 @@ gh workflow run release.yml -f prerelease=beta
 From `4.5.2`, if there's been a breaking change this will open a PR for `5.0.0-beta.0`. Running it again will produce `5.0.0-beta.1`. A different identifier will reset the counter (`5.0.0-rc.0`), or a bare number produces the `5.0.0-0` style. It's one-shot: the next ordinary push opens a separate PR for a stable release (e.g. `5.0.0`). Prerelease and stable release PRs are tracked independently, so an ordinary push won't close an open prerelease PR.
 
 Prereleases don't take the `latest` dist-tag: `uppt/publish` derives the tag from the version being published, so `5.0.0-beta.0` is staged as `beta`, `5.0.0-rc.1` as `rc`, and `5.0.0-0` as `next` (a bare number has no name to use). Set `npm-tag` on `uppt/publish` to override; it's also required if a tarball's filename carries no parseable version, as uppt fails rather than defaulting to `latest`.
+
+## Maintenance releases
+
+To release from an older line, run `uppt/pr` on that branch with `base-branch` set to it (`3.x`), and add the branch to the workflow's `push` and `pull_request` triggers.
+
+Nothing else to configure: a release PR merged into a branch other than the default one can't be the newest line, so uppt publishes it to `<major>x` (`3.9.1` → `3x`) instead of `latest`, and doesn't mark the GitHub release as the repo's "Latest". The derived tag is passed to the publish workflow as its `npm-tag` input, which the [starter workflow](#getting-started) already forwards to `uppt/publish`.
+
+If your line uses a different dist-tag (`legacy`, `v3-latest`), or the release spans majors so there's no single `<major>x` to derive, set `npm-tag` on `uppt/release`:
+
+```yaml
+- uses: danielroe/uppt/release@v0
+  with:
+    npm-tag: legacy
+```
+
+It overrides the derivation, applies to every tarball in the run, and any value other than `latest` also keeps the GitHub release out of the "Latest" slot.
 
 ## Monorepo support
 
@@ -269,6 +291,10 @@ on:
     inputs:
       prerelease:
         description: 'Cut a prerelease instead of a normal release, e.g. `beta`, `rc`, or `0`'
+        required: false
+        default: ''
+      npm-tag:
+        description: 'npm dist-tag to publish to. Set by uppt/release for maintenance lines; leave blank otherwise'
         required: false
         default: ''
       releases:
@@ -362,6 +388,7 @@ jobs:
       - uses: danielroe/uppt/publish@775bb233d2c5671b2c12d48f822778aae8231376 # v0.6.7
         with:
           files: ${{ needs.pack.outputs.files }}
+          npm-tag: ${{ inputs.npm-tag }}
           releases: ${{ inputs.releases }}
 ```
 </details>

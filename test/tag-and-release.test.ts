@@ -9,7 +9,7 @@ vi.mock('node:child_process', () => ({ execFileSync }))
 
 const { main } = await import('../scripts/tag-and-release.ts')
 
-const TAG_ENV = ['GITHUB_TOKEN', 'GITHUB_REPOSITORY', 'MODE', 'PACKAGES', 'PR_BODY', 'PUBLISH_WORKFLOW'] as const
+const TAG_ENV = ['GITHUB_TOKEN', 'GITHUB_REPOSITORY', 'MODE', 'PACKAGES', 'PR_BODY', 'PUBLISH_WORKFLOW', 'NPM_TAG', 'BASE_BRANCH', 'DEFAULT_BRANCH'] as const
 
 let env: NodeJS.ProcessEnv
 let cwd: string
@@ -107,6 +107,51 @@ describe('tag-and-release', () => {
     expect(ghCalls().at(-2)).toEqual(['release', 'create', 'v1.2.3-beta.0', '--title', 'v1.2.3-beta.0', '--notes', '', '--prerelease'])
   })
 
+  it('publishes a maintenance release to <major>x without taking latest', () => {
+    process.env.BASE_BRANCH = '1.x'
+    process.env.DEFAULT_BRANCH = 'main'
+    main()
+    expect(ghCalls().at(-2)).toEqual(['release', 'create', 'v1.2.3', '--title', 'v1.2.3', '--notes', '', '--latest=false'])
+    expect(ghCalls().at(-1)).toEqual(['workflow', 'run', 'release.yml', '--ref', 'v1.2.3', '-f', 'npm-tag=1x'])
+  })
+
+  it('leaves a release from the default branch alone', () => {
+    process.env.BASE_BRANCH = 'main'
+    process.env.DEFAULT_BRANCH = 'main'
+    main()
+    expect(ghCalls().at(-2)).toEqual(['release', 'create', 'v1.2.3', '--title', 'v1.2.3', '--notes', ''])
+    expect(ghCalls().at(-1)).toEqual(['workflow', 'run', 'release.yml', '--ref', 'v1.2.3'])
+  })
+
+  it('leaves a prerelease on a maintenance branch to its own dist-tag', () => {
+    process.env.BASE_BRANCH = '1.x'
+    process.env.DEFAULT_BRANCH = 'main'
+    writePkg(root, { name: 'root-pkg', version: '1.3.0-rc.0' })
+    main()
+    expect(ghCalls().at(-2)).toContain('--prerelease')
+    expect(ghCalls().at(-1)).toEqual(['workflow', 'run', 'release.yml', '--ref', 'v1.3.0-rc.0'])
+  })
+
+  it('forces latest when npm-tag is latest', () => {
+    process.env.BASE_BRANCH = '1.x'
+    process.env.DEFAULT_BRANCH = 'main'
+    process.env.NPM_TAG = 'latest'
+    main()
+    expect(ghCalls().at(-2)).toContain('--latest')
+  })
+
+  it('overrides the derived dist-tag with npm-tag', () => {
+    process.env.NPM_TAG = 'legacy'
+    main()
+    expect(ghCalls().at(-2)).toContain('--latest=false')
+    expect(ghCalls().at(-1)).toEqual(['workflow', 'run', 'release.yml', '--ref', 'v1.2.3', '-f', 'npm-tag=legacy'])
+  })
+
+  it.each(['-bad', 'has space', '1.2.3'])('rejects an invalid npm-tag (%s)', (tag) => {
+    process.env.NPM_TAG = tag
+    expect(() => main()).toThrow(/is not a valid dist-tag/)
+  })
+
   it('refuses to retag an existing version', () => {
     existingTags = ['v1.2.3']
     expect(() => main()).toThrow(/already exists on owner\/repo/)
@@ -158,6 +203,30 @@ describe('tag-and-release', () => {
       writePkg(resolve(root, 'packages/ui'), { name: '@nuxt/ui', version: '2.0.1' })
       main()
       expect(ghCalls().at(-2)).not.toContain('--prerelease')
+    })
+
+    it('publishes a maintenance release to <major>x without taking latest', () => {
+      process.env.BASE_BRANCH = '5.x'
+      process.env.DEFAULT_BRANCH = 'main'
+      main()
+      expect(ghCalls().at(-2)).toContain('--latest=false')
+      expect(ghCalls().at(-1)).toEqual([
+        'workflow', 'run', 'release.yml', '--ref', 'release-2024-05-01',
+        '-f', 'releases=[{"name":"@nuxt/kit","version":"5.0.0","dir":"packages/kit"}]',
+        '-f', 'npm-tag=5x',
+      ])
+    })
+
+    it('refuses to derive a dist-tag for a maintenance release spanning majors', () => {
+      writePkg(resolve(root, 'packages/ui'), { name: '@nuxt/ui', version: '3.0.0' })
+      process.env.BASE_BRANCH = '5.x'
+      process.env.DEFAULT_BRANCH = 'main'
+      expect(() => main()).toThrow(/spans majors 3, 5/)
+    })
+
+    it('leaves a release from the default branch alone', () => {
+      main()
+      expect(ghCalls().at(-2)).not.toContain('--latest=false')
     })
 
     it('suffixes the coordination tag when the date is taken', () => {

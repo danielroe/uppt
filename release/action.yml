@@ -31,6 +31,10 @@ inputs:
     description: 'Monorepo versioning mode: `lockstep` (default) or `independent`. Must match the value passed to `uppt/pr`. In independent mode the action tags each released package as `<name>@X.Y.Z`, attaches the GitHub release to a `release-YYYY-MM-DD` coordination tag, and dispatches the publish workflow with a `releases` payload input (which the caller''s workflow must declare under `workflow_dispatch`).'
     required: false
     default: 'lockstep'
+  npm-tag:
+    description: 'npm dist-tag override, passed to the publish workflow as an `npm-tag` input. Only needed when a maintenance line does not use the derived `<major>x` tag (e.g. `legacy`), or when the release spans majors. A release merged into a branch other than the default one derives `<major>x` on its own and is not marked as the repository''s latest release.'
+    required: false
+    default: ''
   allow-forks:
     description: 'Whether to run when the repository is a fork. Defaults to `false` so a fork of a repo using uppt does not tag and publish releases of its own.'
     required: false
@@ -109,4 +113,7 @@ runs:
         PUBLISH_WORKFLOW: ${{ inputs.publish-workflow }}
         PACKAGES: ${{ inputs.packages }}
         MODE: ${{ inputs.mode }}
+        NPM_TAG: ${{ inputs.npm-tag }}
+        BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/tag-and-release.ts

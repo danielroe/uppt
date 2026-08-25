@@ -10,6 +10,12 @@
 //   GITHUB_REPOSITORY      "owner/repo" (set automatically inside Actions)
 //   PR_BODY                PR body, used verbatim as release notes
 //   PUBLISH_WORKFLOW       workflow filename to dispatch (default: release.yml)
+//   BASE_BRANCH            branch the release PR was merged into
+//   DEFAULT_BRANCH         the repo's default branch. When BASE_BRANCH differs
+//                          this is a maintenance release: it publishes to
+//                          `<major>x` and does not become the latest release.
+//   NPM_TAG                dist-tag override, for lines whose tag isn't
+//                          `<major>x` (`legacy`, `v3-latest`)
 //   PACKAGES               newline-separated list of publishable workspace
 //                          dirs/globs (monorepo); omit for single-package repos
 //   MODE                   "lockstep" (default) or "independent". Independent
@@ -26,6 +32,60 @@ import { runMain } from './_cli.ts'
 import { isPrerelease, isSemver, resolveCurrentVersion, resolveWorkspaces } from './_workspaces.ts'
 import { coordinationTag, deriveReleaseSet, packageTag, releaseTitle, serialiseReleases } from './_independent.ts'
 import { getAllTags } from './update-changelog.ts'
+
+const DIST_TAG_RE = /^[a-z0-9][\w.-]*$/i
+
+/**
+ * dist-tag the publish job should use, and hence whether this release is the
+ * repo's latest. A release merged into a branch other than the default one is
+ * by definition not the newest line, so it publishes to `<major>x` (`3x`)
+ * rather than moving `latest` backwards. `NPM_TAG` overrides the derivation.
+ * Returns `undefined` when the publish job's own derivation is right.
+ *
+ * @param versions versions being released; they must share a major for a
+ * derived tag to be meaningful.
+ */
+function resolveDistTag (versions: string[], env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const override = env.NPM_TAG?.trim()
+  if (override) {
+    if (!DIST_TAG_RE.test(override) || isSemver(override)) {
+      throw new Error(`\`npm-tag\` is not a valid dist-tag: ${JSON.stringify(override)}`)
+    }
+    return override
+  }
+
+  const base = env.BASE_BRANCH?.trim()
+  const defaultBranch = env.DEFAULT_BRANCH?.trim()
+  if (!base || !defaultBranch || base === defaultBranch) return undefined
+  // A prerelease already publishes to its own identifier and is never the
+  // latest release, so there's nothing for the branch to add.
+  if (versions.every(isPrerelease)) return undefined
+
+  const majors = new Set(versions.map(version => version.split('.')[0]!))
+  if (majors.size > 1) {
+    throw new Error(
+      `Releasing from "${base}" (not the default branch "${defaultBranch}") means this is not the newest release line, `
+      + `but the release spans majors ${[...majors].sort().join(', ')}, so there is no single dist-tag to derive. `
+      + 'Set the `npm-tag` input explicitly.',
+    )
+  }
+  return `${[...majors][0]}x`
+}
+
+/**
+ * Flags controlling whether GitHub treats the release as the repo's latest.
+ * A prerelease is never latest, and neither is anything publishing to a
+ * dist-tag other than `latest`.
+ */
+function latestFlags (opts: { prerelease: boolean, distTag: string | undefined }): string[] {
+  if (opts.distTag) return opts.distTag === 'latest' ? ['--latest'] : ['--latest=false']
+  return opts.prerelease ? ['--prerelease'] : []
+}
+
+/** `gh workflow run` inputs carrying the derived dist-tag, if there is one. */
+function distTagInput (distTag: string | undefined): string[] {
+  return distTag ? ['-f', `npm-tag=${distTag}`] : []
+}
 
 function run (cmd: string, args: string[], opts: { env?: NodeJS.ProcessEnv } = {}) {
   execFileSync(cmd, args, { stdio: 'inherit', env: { ...process.env, ...opts.env } })
@@ -75,6 +135,8 @@ function mainIndependent (repo: string, ghEnv: NodeJS.ProcessEnv) {
     throw new Error('No workspace version differs from its latest tag; nothing to release. Was the release PR merged without version bumps?')
   }
 
+  const distTag = resolveDistTag(releases.map(release => release.version))
+
   const sha = capture('git', ['rev-parse', 'HEAD'])
   const localTags = new Set(getAllTags())
   const coordTag = coordinationTag(new Date(), tag => localTags.has(tag) || tagExists(repo, tag, ghEnv))
@@ -101,13 +163,16 @@ function mainIndependent (repo: string, ghEnv: NodeJS.ProcessEnv) {
   }
 
   const body = process.env.PR_BODY ?? ''
-  // Only mark the coordination release as a prerelease when nothing stable
-  // ships alongside; a mixed set still deserves to be the latest release.
-  const prereleaseFlag = releases.every(release => isPrerelease(release.version)) ? ['--prerelease'] : []
-  run('gh', ['release', 'create', coordTag, '--title', releaseTitle(releases), '--notes', body, ...prereleaseFlag], { env: ghEnv })
+  // A mixed set (some prerelease, some stable) still deserves to be latest,
+  // so the prerelease check requires every released package to qualify.
+  const flags = latestFlags({
+    prerelease: releases.every(release => isPrerelease(release.version)),
+    distTag,
+  })
+  run('gh', ['release', 'create', coordTag, '--title', releaseTitle(releases), '--notes', body, ...flags], { env: ghEnv })
 
   const workflow = process.env.PUBLISH_WORKFLOW || 'release.yml'
-  run('gh', ['workflow', 'run', workflow, '--ref', coordTag, '-f', `releases=${serialiseReleases(releases)}`], { env: ghEnv })
+  run('gh', ['workflow', 'run', workflow, '--ref', coordTag, '-f', `releases=${serialiseReleases(releases)}`, ...distTagInput(distTag)], { env: ghEnv })
 
   console.log(`Tagged ${releases.length} package${releases.length === 1 ? '' : 's'} (${releases.map(packageTag).join(', ')}) plus ${coordTag}, created release, dispatched ${workflow}.`)
 }
@@ -140,14 +205,17 @@ export function main () {
     throw new Error(`Refusing to tag: ${tag} already exists on ${repo}. If this is a rerun, delete the tag and the release first, or bump the version.`)
   }
 
+  const distTag = resolveDistTag([version])
+  const flags = latestFlags({ prerelease: isPrerelease(version), distTag })
+
   const sha = capture('git', ['rev-parse', 'HEAD'])
   createTag(repo, tag, sha, ghEnv)
 
   const body = process.env.PR_BODY ?? ''
-  run('gh', ['release', 'create', tag, '--title', tag, '--notes', body, ...(isPrerelease(version) ? ['--prerelease'] : [])], { env: ghEnv })
+  run('gh', ['release', 'create', tag, '--title', tag, '--notes', body, ...flags], { env: ghEnv })
 
   const workflow = process.env.PUBLISH_WORKFLOW || 'release.yml'
-  run('gh', ['workflow', 'run', workflow, '--ref', tag], { env: ghEnv })
+  run('gh', ['workflow', 'run', workflow, '--ref', tag, ...distTagInput(distTag)], { env: ghEnv })
 
   console.log(`Tagged ${tag}, created release, dispatched ${workflow}.`)
 }
