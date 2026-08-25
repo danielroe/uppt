@@ -51,6 +51,7 @@ const git = {
   tags: [] as string[],
   commits: [] as FakeCommit[],
   revList: [] as string[],
+  divergedSubjects: [] as string[],
   remote: 'git@github.com:owner/repo.git',
   branch: 'main',
 }
@@ -85,6 +86,7 @@ function stubGit () {
     if (sub === 'rev-parse') return args.includes('--abbrev-ref') ? git.branch : HEAD_SHA
     if (sub === 'rev-list') return git.revList.join('\n')
     if (sub === 'log' && args[1] === '-1') return '2024-01-01T00:00:00Z'
+    if (sub === 'log' && args.includes('--pretty=format:%s')) return git.divergedSubjects.join('\n')
     if (sub === 'log') return record(...git.commits)
     throw new Error(`unexpected git call: ${args.join(' ')}`)
   })
@@ -213,6 +215,7 @@ beforeEach(() => {
   git.tags = ['v1.2.3']
   git.commits = [FEAT]
   git.revList = [FEAT.hash]
+  git.divergedSubjects = []
   git.remote = 'git@github.com:owner/repo.git'
   git.branch = 'main'
 
@@ -253,6 +256,25 @@ describe('lockstep main', () => {
     expect(prBody()).toContain('### 🚀 Enhancements')
     expect(prBody()).toContain('- add a thing (#7)')
     expect(prBody()).toContain('- Ada (@ada)')
+  })
+
+  it('omits commits already released on the diverged branch', async () => {
+    const other: FakeCommit = { hash: 'b'.repeat(40), short: 'bbbbbbb', name: 'Bo', email: 'bo@example.com', subject: 'fix: cherry-picked (#8)' }
+    git.commits = [FEAT, other]
+    git.revList = [FEAT.hash, other.hash]
+    api.logins = new Map([['aaaaaaa', 'ada'], ['bbbbbbb', 'bo']])
+    git.divergedSubjects = [other.subject]
+    await main()
+    expect(prBody()).toContain('- add a thing (#7)')
+    expect(prBody()).not.toContain('cherry-picked')
+  })
+
+  it('cuts the commit range at the date of the previous tag', async () => {
+    await main()
+    const calls = execFileSync.mock.calls as Array<[string, string[]]>
+    const args = calls.find(([, args]) => args[0] === 'log' && args[1] === 'refs/tags/v1.2.3..HEAD')![1]
+    expect(args).toContain('--since')
+    expect(args[args.indexOf('--since') + 1]).toBe('2024-01-01T00:00:00Z')
   })
 
   it('skips when HEAD is the merge of a release PR', async () => {

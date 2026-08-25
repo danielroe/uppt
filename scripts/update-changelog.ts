@@ -249,11 +249,24 @@ function subjectsOnlyOn (ref: string): Set<string> {
   }
 }
 
+/** Committer date of the commit a tag points at, as an ISO 8601 string. */
+function tagDate (ref: string): string | null {
+  try {
+    return execFileSync('git', ['log', '-1', '--format=%cI', ref], { encoding: 'utf8', maxBuffer: MAX_BUFFER }).trim() || null
+  } catch {
+    return null
+  }
+}
+
 function getCommitsSince (tag: Tag | null): Commit[] {
   const range = tag ? `${tag.ref}..HEAD` : 'HEAD'
+  // Merging the base branch into a release branch (or a tag that isn't an
+  // ancestor of HEAD) puts commits older than the tag inside `tag..HEAD`;
+  // they shipped in an earlier release, so cut the range at the tag's date.
+  const since = tag ? tagDate(tag.ref) : null
   const stdout = execFileSync(
     'git',
-    ['log', range, `--pretty=format:%H%x1f%h%x1f%an%x1f%ae%x1f%s%x1f%b%x1e`],
+    ['log', range, ...(since ? ['--since', since] : []), `--pretty=format:%H%x1f%h%x1f%an%x1f%ae%x1f%s%x1f%b%x1e`],
     { encoding: 'utf8', maxBuffer: MAX_BUFFER },
   )
   const commits = stdout
