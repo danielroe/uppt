@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { buildBumpFileSet, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
+import { buildBumpFileSet, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, truncateBody, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
 import { resolveWorkspaces } from '../scripts/_workspaces.ts'
 
 let tmp: string
@@ -512,6 +512,20 @@ describe('extractPreamble', () => {
 
   it('returns the whole body when no generated heading exists', () => {
     expect(extractPreamble('> just a note')).toBe('> just a note')
+  })
+})
+
+describe('truncateBody', () => {
+  it('leaves bodies within the limit untouched', () => {
+    expect(truncateBody('short body')).toBe('short body')
+  })
+
+  it('trims on a line boundary and appends a notice', () => {
+    const body = Array.from({ length: 100 }, (_, i) => `- line ${i}`).join('\n')
+    const result = truncateBody(body, 200)
+    expect(result.length).toBeLessThanOrEqual(200)
+    expect(result).toMatch(/_Changelog truncated: it exceeded GitHub's 65536 character limit\._$/)
+    expect(result.split('\n').at(-3)).toBe('- line 13')
   })
 })
 

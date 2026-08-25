@@ -598,15 +598,30 @@ async function findOpenPR (
   return existing[0]
 }
 
+/**
+ * GitHub rejects issue/PR bodies longer than 65536 characters with a 422.
+ * Repos with very long changelogs (thousands of commits since the last tag)
+ * hit this, so trim on a line boundary and say so in the body.
+ */
+export function truncateBody (body: string, limit = 65536): string {
+  if (body.length <= limit) return body
+  const notice = '\n\n_Changelog truncated: it exceeded GitHub\'s 65536 character limit._'
+  const budget = limit - notice.length
+  const cut = body.slice(0, budget)
+  const lastBreak = cut.lastIndexOf('\n')
+  return (lastBreak > 0 ? cut.slice(0, lastBreak) : cut).trimEnd() + notice
+}
+
 /** Update `currentPR` in place, or open a new draft PR when there is none. */
 async function upsertReleasePR (
   repo: { owner: string, repo: string },
   opts: { currentPR?: { number: number }, title: string, head: string, base: string, body: string },
 ): Promise<void> {
+  const body = truncateBody(opts.body)
   if (opts.currentPR) {
     await gh(`/repos/${repo.owner}/${repo.repo}/pulls/${opts.currentPR.number}`, {
       method: 'PATCH',
-      body: JSON.stringify({ title: opts.title, body: opts.body }),
+      body: JSON.stringify({ title: opts.title, body }),
     })
     console.log(`Updated PR #${opts.currentPR.number}`)
   } else {
@@ -618,7 +633,7 @@ async function upsertReleasePR (
           title: opts.title,
           head: opts.head,
           base: opts.base,
-          body: opts.body,
+          body,
           draft: true,
         }),
       },
