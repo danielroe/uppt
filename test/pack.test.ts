@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import process from 'node:process'
@@ -35,7 +35,7 @@ beforeEach(() => {
   env = { ...process.env }
   cwd = process.cwd()
   for (const key of PACK_ENV) delete process.env[key]
-  root = mkdtempSync(resolve(tmpdir(), 'uppt-pack-'))
+  root = realpathSync(mkdtempSync(resolve(tmpdir(), 'uppt-pack-')))
   outDir = resolve(root, 'out')
   process.env.PACK_OUT_DIR = outDir
   process.env.GITHUB_REF = 'refs/tags/v1.2.3'

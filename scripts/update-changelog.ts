@@ -250,12 +250,8 @@ function subjectsOnlyOn (ref: string): Set<string> {
 }
 
 /** Committer date of the commit a tag points at, as an ISO 8601 string. */
-function tagDate (ref: string): string | null {
-  try {
-    return execFileSync('git', ['log', '-1', '--format=%cI', ref], { encoding: 'utf8', maxBuffer: MAX_BUFFER }).trim() || null
-  } catch {
-    return null
-  }
+function tagDate (ref: string): string {
+  return execFileSync('git', ['log', '-1', '--format=%cI', ref], { encoding: 'utf8', maxBuffer: MAX_BUFFER }).trim()
 }
 
 function getCommitsSince (tag: Tag | null): Commit[] {

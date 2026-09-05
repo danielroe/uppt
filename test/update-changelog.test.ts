@@ -551,6 +551,12 @@ describe('truncateBody', () => {
     expect(result).toMatch(/_Changelog truncated: it exceeded GitHub's 65536 character limit\._$/)
     expect(result.split('\n').at(-3)).toBe('- line 13')
   })
+
+  it('cuts mid-line when there is no line boundary to trim on', () => {
+    const result = truncateBody('x'.repeat(200), 100)
+    expect(result.length).toBeLessThanOrEqual(100)
+    expect(result).toMatch(/^x+\n\n_Changelog truncated: it exceeded GitHub's 65536 character limit\._$/)
+  })
 })
 
 describe('independent release PR', () => {
