@@ -1,6 +1,7 @@
 name: agent-scan
 
 on:
+  # zizmor: ignore[dangerous-triggers] - no PR content is checked out or executed; DO NOT add actions/checkout here
   pull_request_target:
     types:
       - closed
