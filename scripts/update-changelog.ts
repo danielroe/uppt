@@ -47,6 +47,8 @@ export interface Commit {
   isBreaking: boolean
   author: { name: string, email: string }
   references: string[]
+  /** Hash of the commit this one reverts, when its body names one. */
+  revert?: string
 }
 
 interface Contributor {
@@ -68,6 +70,7 @@ const TYPE_TITLES: Record<string, string> = {
   test: '✅ Tests',
   style: '🎨 Styles',
   ci: '🤖 CI',
+  revert: '⏪ Reverts',
 }
 
 const KNOWN_TYPES = new Set(Object.keys(TYPE_TITLES))
@@ -181,6 +184,8 @@ function parseCommit (raw: string): Commit | null {
   const [hash, shortHash, authorName, authorEmail, subject, body] = raw.split('\x1f')
   if (!hash || !shortHash || !subject) return null
 
+  const revert = (body || '').match(/\breverts\s+(?:commit\s+)?([0-9a-f]{7,40})\b/i)?.[1]?.toLowerCase()
+
   const header = subject.match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/)
   if (!header) {
     return {
@@ -193,6 +198,7 @@ function parseCommit (raw: string): Commit | null {
       isBreaking: false,
       author: { name: authorName || '', email: authorEmail || '' },
       references: [],
+      revert,
     }
   }
   const [, type, scope = '', bang, rawDescription] = header
@@ -219,7 +225,28 @@ function parseCommit (raw: string): Commit | null {
     isBreaking,
     author: { name: authorName || '', email: authorEmail || '' },
     references: [...new Set(references)],
+    revert,
   }
+}
+
+/**
+ * Collapse revert pairs: a `revert:` commit and its target both drop out
+ * when the target is in the same range. Reverts apply oldest-first, so a
+ * revert of a revert restores the original commit.
+ */
+export function dropRevertedCommits (commits: Commit[]): Commit[] {
+  const cancelled = new Set<string>()
+  const targets = new Map<string, string>()
+  for (const commit of [...commits].reverse()) {
+    if (commit.type !== 'revert' || !commit.revert) continue
+    const target = commits.find(c => c.hash.startsWith(commit.revert!))?.hash
+    if (!target) continue
+    cancelled.add(commit.hash).add(target)
+    const restored = targets.get(target)
+    if (restored) cancelled.delete(restored)
+    targets.set(commit.hash, target)
+  }
+  return cancelled.size ? commits.filter(c => !cancelled.has(c.hash)) : commits
 }
 
 /**
@@ -272,7 +299,7 @@ function getCommitsSince (tag: Tag | null): Commit[] {
     .map(parseCommit)
     .filter((c): c is Commit => c !== null)
 
-  return tag ? dropAlreadyReleased(commits, subjectsOnlyOn(tag.ref)) : commits
+  return dropRevertedCommits(tag ? dropAlreadyReleased(commits, subjectsOnlyOn(tag.ref)) : commits)
 }
 
 export function determineBump (commits: Commit[]): BumpLevel {
