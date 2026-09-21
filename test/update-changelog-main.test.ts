@@ -537,6 +537,28 @@ describe('lockstep main', () => {
     expect(prBody()).toContain('**api:** add widgets')
   })
 
+  it('releases a patch when a breaking change is reverted before it ships', async () => {
+    const breaking: FakeCommit = { hash: 'b'.repeat(40), short: 'bbbbbbb', name: 'Bo', email: 'bo@example.com', subject: 'feat!: remove the old API' }
+    git.commits = [
+      { ...FEAT, hash: 'c'.repeat(40), short: 'ccccccc', subject: `Revert "${breaking.subject}"`, body: `This reverts commit ${breaking.hash}.` },
+      breaking,
+      { ...FEAT, hash: 'd'.repeat(40), short: 'ddddddd', subject: 'fix: something else (#9)' },
+    ]
+    git.revList = [breaking.hash]
+    api.logins = new Map([['ccccccc', 'ada'], ['bbbbbbb', 'bo'], ['ddddddd', 'ada']])
+    await main()
+    const created = calls.find(c => c.method === 'POST' && c.path.endsWith('/pulls'))!
+    expect(created.body).toMatchObject({ title: 'v1.2.4' })
+    expect(prBody()).not.toContain('remove the old API')
+  })
+
+  it('releases a major when reverting a breaking change from an earlier release', async () => {
+    git.commits = [{ ...FEAT, subject: 'Revert "feat!: remove the old API"', body: 'This reverts commit 1234567.' }]
+    await main()
+    const created = calls.find(c => c.method === 'POST' && c.path.endsWith('/pulls'))!
+    expect(created.body).toMatchObject({ title: 'v2.0.0' })
+  })
+
   it('releases a revert of a non-conventional subject', async () => {
     git.commits = [{ ...FEAT, subject: 'Revert "tidy up the thing"', body: 'This reverts commit 1234567.' }]
     await main()
