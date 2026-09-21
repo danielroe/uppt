@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { stripPlaceholderTimetable, TIMETABLE_PLACEHOLDER, buildBumpFileSet, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, truncateBody, dropAlreadyReleased, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
+import { stripPlaceholderTimetable, TIMETABLE_PLACEHOLDER, buildBumpFileSet, dropRevertedCommits, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, truncateBody, dropAlreadyReleased, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
 import { resolveWorkspaces } from '../scripts/_workspaces.ts'
 
 let tmp: string
@@ -548,6 +548,68 @@ describe('dropAlreadyReleased', () => {
   it('is a no-op without diverged subjects', () => {
     const commits = [commit('fix: a')]
     expect(dropAlreadyReleased(commits, new Set())).toBe(commits)
+  })
+})
+
+describe('dropRevertedCommits', () => {
+  const commit = (hash: string, type: string, revert?: string): Commit => ({
+    hash,
+    shortHash: hash.slice(0, 7),
+    message: `${type}: ${hash}`,
+    type,
+    scope: '',
+    description: hash,
+    isBreaking: false,
+    author: { name: 'a', email: 'a@b.c' },
+    references: [],
+    revert,
+  })
+
+  it('drops a revert and the commit it reverts', () => {
+    const commits = [commit('b'.repeat(40), 'revert', 'a'.repeat(7)), commit('a'.repeat(40), 'fix')]
+    expect(dropRevertedCommits(commits)).toEqual([])
+  })
+
+  it('keeps a revert whose target is outside the range', () => {
+    const commits = [commit('b'.repeat(40), 'revert', 'c'.repeat(7)), commit('a'.repeat(40), 'fix')]
+    expect(dropRevertedCommits(commits)).toBe(commits)
+  })
+
+  it('keeps a revert commit with no parseable target', () => {
+    const commits = [commit('b'.repeat(40), 'revert')]
+    expect(dropRevertedCommits(commits)).toBe(commits)
+  })
+
+  it('restores a commit whose revert is itself reverted', () => {
+    const commits = [
+      commit('c'.repeat(40), 'revert', 'b'.repeat(7)),
+      commit('b'.repeat(40), 'revert', 'a'.repeat(7)),
+      commit('a'.repeat(40), 'fix'),
+    ]
+    expect(dropRevertedCommits(commits).map(c => c.hash)).toEqual(['a'.repeat(40)])
+  })
+
+  it('resolves a chain whose root shipped in an earlier release', () => {
+    const commits = [
+      commit('c'.repeat(40), 'revert', 'b'.repeat(7)),
+      commit('b'.repeat(40), 'revert', 'f'.repeat(7)),
+    ]
+    expect(dropRevertedCommits(commits)).toEqual([])
+  })
+
+  it('ignores a revert that names itself', () => {
+    const commits = [commit('b'.repeat(40), 'revert', 'b'.repeat(7))]
+    expect(dropRevertedCommits(commits)).toEqual([])
+  })
+
+  it('drops an even-length revert chain entirely', () => {
+    const commits = [
+      commit('d'.repeat(40), 'revert', 'c'.repeat(7)),
+      commit('c'.repeat(40), 'revert', 'b'.repeat(7)),
+      commit('b'.repeat(40), 'revert', 'a'.repeat(7)),
+      commit('a'.repeat(40), 'fix'),
+    ]
+    expect(dropRevertedCommits(commits)).toEqual([])
   })
 })
 

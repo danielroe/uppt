@@ -47,6 +47,8 @@ export interface Commit {
   isBreaking: boolean
   author: { name: string, email: string }
   references: string[]
+  /** Hash of the commit this one reverts, when its body names one. */
+  revert?: string
 }
 
 interface Contributor {
@@ -68,6 +70,7 @@ const TYPE_TITLES: Record<string, string> = {
   test: '✅ Tests',
   style: '🎨 Styles',
   ci: '🤖 CI',
+  revert: '⏪ Reverts',
 }
 
 const KNOWN_TYPES = new Set(Object.keys(TYPE_TITLES))
@@ -181,21 +184,28 @@ function parseCommit (raw: string): Commit | null {
   const [hash, shortHash, authorName, authorEmail, subject, body] = raw.split('\x1f')
   if (!hash || !shortHash || !subject) return null
 
-  const header = subject.match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/)
+  const revert = (body || '').match(/\breverts\s+(?:commit\s+)?([0-9a-f]{7,40})\b/i)?.[1]?.toLowerCase()
+
+  // `git revert` and GitLab generate `Revert "<original subject>"`; treat it
+  // as a `revert:` commit carrying the original's scope and description.
+  const reverted = subject.match(/^Revert "(.+)"$/)?.[1]
+  const header = (reverted ?? subject).match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/)
   if (!header) {
     return {
       hash,
       shortHash,
       message: subject,
-      type: '',
+      type: reverted ? 'revert' : '',
       scope: '',
-      description: subject,
+      description: reverted ?? subject,
       isBreaking: false,
       author: { name: authorName || '', email: authorEmail || '' },
       references: [],
+      revert,
     }
   }
-  const [, type, scope = '', bang, rawDescription] = header
+  const [, parsedType, scope = '', bang, rawDescription] = header
+  const type = reverted ? 'revert' : parsedType!.toLowerCase()
   const isBreaking = Boolean(bang) || /BREAKING[ -]CHANGE/.test(body || '')
 
   const references: string[] = []
@@ -213,13 +223,45 @@ function parseCommit (raw: string): Commit | null {
     hash,
     shortHash,
     message: subject,
-    type: type!.toLowerCase(),
+    type,
     scope,
     description,
     isBreaking,
     author: { name: authorName || '', email: authorEmail || '' },
     references: [...new Set(references)],
+    revert,
   }
+}
+
+/**
+ * Collapse revert pairs: a revert whose target is in the same range drops
+ * out along with the target, since together they change nothing. A chain of
+ * reverts resolves to the commit it ultimately targets, which survives when
+ * an even number of reverts leaves it applied. A revert whose target shipped
+ * earlier is kept and rendered as an ordinary entry.
+ */
+export function dropRevertedCommits (commits: Commit[]): Commit[] {
+  const find = (prefix: string) => commits.find(c => c.hash.startsWith(prefix))
+  const paired = new Set<string>()
+  const revertCount = new Map<string, number>()
+  for (const commit of commits) {
+    if (commit.type !== 'revert' || !commit.revert) continue
+    let root = find(commit.revert)
+    if (!root) continue
+    const seen = new Set([commit.hash])
+    while (root.type === 'revert' && root.revert && !seen.has(root.hash)) {
+      seen.add(root.hash)
+      const next = find(root.revert)
+      if (!next) break
+      root = next
+    }
+    paired.add(commit.hash)
+    revertCount.set(root.hash, (revertCount.get(root.hash) ?? 0) + 1)
+  }
+  if (!paired.size) return commits
+  return commits.filter(c =>
+    !paired.has(c.hash) && (revertCount.get(c.hash) ?? 0) % 2 === 0,
+  )
 }
 
 /**
@@ -272,7 +314,7 @@ function getCommitsSince (tag: Tag | null): Commit[] {
     .map(parseCommit)
     .filter((c): c is Commit => c !== null)
 
-  return tag ? dropAlreadyReleased(commits, subjectsOnlyOn(tag.ref)) : commits
+  return dropRevertedCommits(tag ? dropAlreadyReleased(commits, subjectsOnlyOn(tag.ref)) : commits)
 }
 
 export function determineBump (commits: Commit[]): BumpLevel {
