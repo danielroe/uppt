@@ -76,7 +76,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: danielroe/uppt/pr@09882a5a0a1a20a0e802613a77ad59fcb1c1611c # v0.6.9
+      - uses: danielroe/uppt/pr@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: ${{ inputs.prerelease }}
@@ -97,7 +97,7 @@ jobs:
       contents: write
       actions: write
     steps:
-      - uses: danielroe/uppt/release@09882a5a0a1a20a0e802613a77ad59fcb1c1611c # v0.6.9
+      - uses: danielroe/uppt/release@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -113,7 +113,7 @@ jobs:
       files: ${{ steps.pack.outputs.files }}
     steps:
       - id: pack
-        uses: danielroe/uppt/pack@09882a5a0a1a20a0e802613a77ad59fcb1c1611c # v0.6.9
+        uses: danielroe/uppt/pack@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
 
   # stage the prebuilt tarball(s) to npm via OIDC
   publish:
@@ -130,7 +130,7 @@ jobs:
       id-token: write
     environment: npm
     steps:
-      - uses: danielroe/uppt/publish@09882a5a0a1a20a0e802613a77ad59fcb1c1611c # v0.6.9
+      - uses: danielroe/uppt/publish@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
         with:
           files: ${{ needs.pack.outputs.files }}
           npm-tag: ${{ inputs.npm-tag }}
@@ -228,7 +228,7 @@ Nothing else to configure: a release PR merged into a branch other than the defa
 If your line uses a different dist-tag (`legacy`, `v3-latest`), or the release spans majors so there's no single `<major>x` to derive, set `npm-tag` on `uppt/release`:
 
 ```yaml
-- uses: danielroe/uppt/release@09882a5a0a1a20a0e802613a77ad59fcb1c1611c # v0.6.9
+- uses: danielroe/uppt/release@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
   with:
     npm-tag: legacy
 ```
@@ -322,7 +322,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: danielroe/uppt/pr@09882a5a0a1a20a0e802613a77ad59fcb1c1611c # v0.6.9
+      - uses: danielroe/uppt/pr@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: ${{ inputs.prerelease }}
@@ -345,7 +345,7 @@ jobs:
       contents: write
       actions: write
     steps:
-      - uses: danielroe/uppt/release@09882a5a0a1a20a0e802613a77ad59fcb1c1611c # v0.6.9
+      - uses: danielroe/uppt/release@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           mode: independent
@@ -365,7 +365,7 @@ jobs:
       files: ${{ steps.pack.outputs.files }}
     steps:
       - id: pack
-        uses: danielroe/uppt/pack@09882a5a0a1a20a0e802613a77ad59fcb1c1611c # v0.6.9
+        uses: danielroe/uppt/pack@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
         with:
           releases: ${{ inputs.releases }}
           packages: |
@@ -385,7 +385,7 @@ jobs:
       id-token: write
     environment: npm
     steps:
-      - uses: danielroe/uppt/publish@09882a5a0a1a20a0e802613a77ad59fcb1c1611c # v0.6.9
+      - uses: danielroe/uppt/publish@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
         with:
           files: ${{ needs.pack.outputs.files }}
           npm-tag: ${{ inputs.npm-tag }}
