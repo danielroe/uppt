@@ -186,22 +186,26 @@ function parseCommit (raw: string): Commit | null {
 
   const revert = (body || '').match(/\breverts\s+(?:commit\s+)?([0-9a-f]{7,40})\b/i)?.[1]?.toLowerCase()
 
-  const header = subject.match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/)
+  // `git revert` and GitLab generate `Revert "<original subject>"`; treat it
+  // as a `revert:` commit carrying the original's scope and description.
+  const reverted = subject.match(/^Revert "(.+)"$/)?.[1]
+  const header = (reverted ?? subject).match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/)
   if (!header) {
     return {
       hash,
       shortHash,
       message: subject,
-      type: '',
+      type: reverted ? 'revert' : '',
       scope: '',
-      description: subject,
+      description: reverted ?? subject,
       isBreaking: false,
       author: { name: authorName || '', email: authorEmail || '' },
       references: [],
       revert,
     }
   }
-  const [, type, scope = '', bang, rawDescription] = header
+  const [, parsedType, scope = '', bang, rawDescription] = header
+  const type = reverted ? 'revert' : parsedType!.toLowerCase()
   const isBreaking = Boolean(bang) || /BREAKING[ -]CHANGE/.test(body || '')
 
   const references: string[] = []
@@ -219,7 +223,7 @@ function parseCommit (raw: string): Commit | null {
     hash,
     shortHash,
     message: subject,
-    type: type!.toLowerCase(),
+    type,
     scope,
     description,
     isBreaking,
@@ -230,23 +234,34 @@ function parseCommit (raw: string): Commit | null {
 }
 
 /**
- * Collapse revert pairs: a `revert:` commit and its target both drop out
- * when the target is in the same range. Reverts apply oldest-first, so a
- * revert of a revert restores the original commit.
+ * Collapse revert pairs: a revert whose target is in the same range drops
+ * out along with the target, since together they change nothing. A chain of
+ * reverts resolves to the commit it ultimately targets, which survives when
+ * an even number of reverts leaves it applied. A revert whose target shipped
+ * earlier is kept and rendered as an ordinary entry.
  */
 export function dropRevertedCommits (commits: Commit[]): Commit[] {
-  const cancelled = new Set<string>()
-  const targets = new Map<string, string>()
-  for (const commit of [...commits].reverse()) {
+  const find = (prefix: string) => commits.find(c => c.hash.startsWith(prefix))
+  const paired = new Set<string>()
+  const revertCount = new Map<string, number>()
+  for (const commit of commits) {
     if (commit.type !== 'revert' || !commit.revert) continue
-    const target = commits.find(c => c.hash.startsWith(commit.revert!))?.hash
-    if (!target) continue
-    cancelled.add(commit.hash).add(target)
-    const restored = targets.get(target)
-    if (restored) cancelled.delete(restored)
-    targets.set(commit.hash, target)
+    let root = find(commit.revert)
+    if (!root) continue
+    const seen = new Set([commit.hash])
+    while (root.type === 'revert' && root.revert && !seen.has(root.hash)) {
+      seen.add(root.hash)
+      const next = find(root.revert)
+      if (!next) break
+      root = next
+    }
+    paired.add(commit.hash)
+    revertCount.set(root.hash, (revertCount.get(root.hash) ?? 0) + 1)
   }
-  return cancelled.size ? commits.filter(c => !cancelled.has(c.hash)) : commits
+  if (!paired.size) return commits
+  return commits.filter(c =>
+    !paired.has(c.hash) && (revertCount.get(c.hash) ?? 0) % 2 === 0,
+  )
 }
 
 /**

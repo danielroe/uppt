@@ -586,7 +586,30 @@ describe('dropRevertedCommits', () => {
       commit('b'.repeat(40), 'revert', 'a'.repeat(7)),
       commit('a'.repeat(40), 'fix'),
     ]
-    expect(dropRevertedCommits(commits).map(c => c.type)).toEqual(['fix'])
+    expect(dropRevertedCommits(commits).map(c => c.hash)).toEqual(['a'.repeat(40)])
+  })
+
+  it('resolves a chain whose root shipped in an earlier release', () => {
+    const commits = [
+      commit('c'.repeat(40), 'revert', 'b'.repeat(7)),
+      commit('b'.repeat(40), 'revert', 'f'.repeat(7)),
+    ]
+    expect(dropRevertedCommits(commits)).toEqual([])
+  })
+
+  it('ignores a revert that names itself', () => {
+    const commits = [commit('b'.repeat(40), 'revert', 'b'.repeat(7))]
+    expect(dropRevertedCommits(commits)).toEqual([])
+  })
+
+  it('drops an even-length revert chain entirely', () => {
+    const commits = [
+      commit('d'.repeat(40), 'revert', 'c'.repeat(7)),
+      commit('c'.repeat(40), 'revert', 'b'.repeat(7)),
+      commit('b'.repeat(40), 'revert', 'a'.repeat(7)),
+      commit('a'.repeat(40), 'fix'),
+    ]
+    expect(dropRevertedCommits(commits)).toEqual([])
   })
 })
 

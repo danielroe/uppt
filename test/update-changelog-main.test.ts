@@ -530,6 +530,19 @@ describe('lockstep main', () => {
     expect(created.body).toMatchObject({ title: 'v1.2.4' })
   })
 
+  it('releases the default `git revert` subject, keeping the original scope', async () => {
+    git.commits = [{ ...FEAT, subject: 'Revert "feat(api): add widgets"', body: 'This reverts commit 1234567.' }]
+    await main()
+    expect(prBody()).toContain('### ⏪ Reverts')
+    expect(prBody()).toContain('**api:** add widgets')
+  })
+
+  it('releases a revert of a non-conventional subject', async () => {
+    git.commits = [{ ...FEAT, subject: 'Revert "tidy up the thing"', body: 'This reverts commit 1234567.' }]
+    await main()
+    expect(prBody()).toContain('- tidy up the thing (')
+  })
+
   it('drops a commit and its revert when both land in the same release', async () => {
     const reverted: FakeCommit = { hash: 'b'.repeat(40), short: 'bbbbbbb', name: 'Bo', email: 'bo@example.com', subject: 'fix: temporary (#8)' }
     git.commits = [
