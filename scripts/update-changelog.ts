@@ -1041,6 +1041,16 @@ export function extractPreamble (body: string | null | undefined): string | null
   return preamble || null
 }
 
+/** Timetable line seeded into a fresh release PR preamble. */
+export const TIMETABLE_PLACEHOLDER = '> **Timetable**: to be announced.'
+
+/** Remove the unedited timetable line, and its blockquote spacer, from a PR body. */
+export function stripPlaceholderTimetable (body: string): string {
+  return body
+    .replaceAll(`\n>\n${TIMETABLE_PLACEHOLDER}`, '')
+    .replaceAll(`\n${TIMETABLE_PLACEHOLDER}`, '')
+}
+
 function propagationCauses (release: PackageRelease, releasedNames: Set<string>): string[] {
   const causes = new Set<string>()
   for (const field of DEPENDENCY_FIELDS) {
@@ -1064,8 +1074,6 @@ export function buildIndependentBody (
   opts: {
     owner: string
     repo: string
-    /** Release branch name, used as the `compare` target for changelog links. */
-    branch: string
     preamble: string
     contributors?: Contributor[]
   },
@@ -1080,7 +1088,7 @@ export function buildIndependentBody (
         owner: opts.owner,
         repo: opts.repo,
         fromRef: release.fromTag,
-        toRef: opts.branch,
+        toRef: `${release.name}@${release.newVersion}`,
         packageScopes: release.scopes,
       }), '')
     } else {
@@ -1180,7 +1188,7 @@ export async function main () {
     owner: repo.owner,
     repo: repo.repo,
     fromRef: latestTag,
-    toRef: releaseBranch,
+    toRef: `v${newVersion}`,
   })
 
   console.log(`Current: ${currentVersion}  ->  ${newVersion} (${bump})`)
@@ -1251,7 +1259,7 @@ export async function main () {
   const currentPR = await findOpenPR(repo, releaseBranch)
   const preamble = extractPreamble(currentPR?.body)
     || seedPreamble
-    || `> v${newVersion} is the next ${bump} release.\n>\n> **Timetable**: to be announced.`
+    || `> v${newVersion} is the next ${bump} release.\n>\n${TIMETABLE_PLACEHOLDER}`
 
   const body = [
     preamble,
@@ -1390,12 +1398,11 @@ async function runIndependent (packagesInput: string): Promise<void> {
   const currentPR = await findOpenPR(repo, releaseBranch)
   const preamble = extractPreamble(currentPR?.body)
     || seedPreamble
-    || `> The next set of package releases, covering all packages with unreleased changes.\n>\n> **Timetable**: to be announced.`
+    || `> The next set of package releases, covering all packages with unreleased changes.\n>\n${TIMETABLE_PLACEHOLDER}`
 
   const body = buildIndependentBody(plan, {
     owner: repo.owner,
     repo: repo.repo,
-    branch: releaseBranch,
     preamble,
     contributors,
   })

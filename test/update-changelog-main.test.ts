@@ -261,6 +261,7 @@ describe('lockstep main', () => {
     expect(prBody()).toContain('### 🚀 Enhancements')
     expect(prBody()).toContain('- add a thing (#7)')
     expect(prBody()).toContain('- Ada (@ada)')
+    expect(prBody()).toContain('/compare/v1.2.3...v1.3.0)')
   })
 
   it('omits commits already released on the diverged branch', async () => {

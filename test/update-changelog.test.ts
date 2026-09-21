@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { buildBumpFileSet, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, truncateBody, dropAlreadyReleased, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
+import { stripPlaceholderTimetable, TIMETABLE_PLACEHOLDER, buildBumpFileSet, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, truncateBody, dropAlreadyReleased, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
 import { resolveWorkspaces } from '../scripts/_workspaces.ts'
 
 let tmp: string
@@ -515,6 +515,18 @@ describe('extractPreamble', () => {
   })
 })
 
+describe('stripPlaceholderTimetable', () => {
+  it('drops the untouched placeholder and its blockquote spacer', () => {
+    const body = `> v1.2.0 is the next minor release.\n>\n${TIMETABLE_PLACEHOLDER}\n\n## 👉 Changelog`
+    expect(stripPlaceholderTimetable(body)).toBe('> v1.2.0 is the next minor release.\n\n## 👉 Changelog')
+  })
+
+  it('keeps an edited timetable', () => {
+    const body = '> v1.2.0 is the next minor release.\n>\n> **Timetable**: Tuesday.\n\n## 👉 Changelog'
+    expect(stripPlaceholderTimetable(body)).toBe(body)
+  })
+})
+
 describe('dropAlreadyReleased', () => {
   const commit = (message: string): Commit => ({
     hash: message,
@@ -589,7 +601,7 @@ describe('independent release PR', () => {
   }
 
   const fontaineTags = ['fontaine@0.8.0', 'fontless@0.2.1']
-  const bodyOpts = { owner: 'unjs', repo: 'fontaine', branch: 'release/main-pending', preamble: '> intro' }
+  const bodyOpts = { owner: 'unjs', repo: 'fontaine', preamble: '> intro' }
 
   function fontainePlan (commits: Commit[]) {
     return computeIndependentPlan({
@@ -608,6 +620,12 @@ describe('independent release PR', () => {
     expect(fontaineIndex).toBeGreaterThan(-1)
     expect(fontlessIndex).toBeGreaterThan(fontaineIndex)
     expect(body).toContain('add metric overrides')
+  })
+
+  it('links the changelog diff to the tag the release will create', () => {
+    const body = buildIndependentBody(fontainePlan([commit('feat(fontaine): add metric overrides')]), bodyOpts)
+
+    expect(body).toContain('[compare changes](https://github.com/unjs/fontaine/compare/fontaine@0.8.0...fontaine@0.8.1)')
   })
 
   it('drops the package scope when it matches the section it renders in', () => {

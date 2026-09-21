@@ -8,7 +8,8 @@
 // Env:
 //   GITHUB_TOKEN           required (tag push, release create, workflow dispatch)
 //   GITHUB_REPOSITORY      "owner/repo" (set automatically inside Actions)
-//   PR_BODY                PR body, used verbatim as release notes
+//   PR_BODY                PR body, used as release notes minus the unedited
+//                          timetable line
 //   PUBLISH_WORKFLOW       workflow filename to dispatch (default: release.yml)
 //   BASE_BRANCH            branch the release PR was merged into
 //   DEFAULT_BRANCH         the repo's default branch. When BASE_BRANCH differs
@@ -31,7 +32,7 @@ import { execFileSync } from 'node:child_process'
 import { runMain } from './_cli.ts'
 import { isPrerelease, isSemver, resolveCurrentVersion, resolveWorkspaces } from './_workspaces.ts'
 import { coordinationTag, deriveReleaseSet, packageTag, releaseTitle, serialiseReleases } from './_independent.ts'
-import { getAllTags } from './update-changelog.ts'
+import { getAllTags, stripPlaceholderTimetable } from './update-changelog.ts'
 
 const DIST_TAG_RE = /^[a-z0-9][\w.-]*$/i
 
@@ -162,7 +163,7 @@ function mainIndependent (repo: string, ghEnv: NodeJS.ProcessEnv) {
     }
   }
 
-  const body = process.env.PR_BODY ?? ''
+  const body = stripPlaceholderTimetable(process.env.PR_BODY ?? '')
   // A mixed set (some prerelease, some stable) still deserves to be latest,
   // so the prerelease check requires every released package to qualify.
   const flags = latestFlags({
@@ -211,7 +212,7 @@ export function main () {
   const sha = capture('git', ['rev-parse', 'HEAD'])
   createTag(repo, tag, sha, ghEnv)
 
-  const body = process.env.PR_BODY ?? ''
+  const body = stripPlaceholderTimetable(process.env.PR_BODY ?? '')
   run('gh', ['release', 'create', tag, '--title', tag, '--notes', body, ...flags], { env: ghEnv })
 
   const workflow = process.env.PUBLISH_WORKFLOW || 'release.yml'
