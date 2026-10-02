@@ -204,6 +204,21 @@ function prBody (): string {
   return (call?.body as { body: string }).body
 }
 
+function releaseBranch (ref: string, files: Record<string, string>, opts: { behindBy?: number, baseChanged?: string[], extra?: Array<{ filename: string }> } = {}) {
+  api.branches.set(ref, 'bump-sha')
+  for (const [path, content] of Object.entries(files)) api.contents.set(`${ref}:${path}`, content)
+  api.compares.set(`main...${ref}`, {
+    files: [...Object.keys(files).map(filename => ({ filename })), ...(opts.extra ?? [])],
+    merge_base_commit: { sha: 'mb' },
+    behind_by: opts.behindBy ?? 0,
+  })
+  if (opts.baseChanged) {
+    api.compares.set('mb...main', { files: opts.baseChanged.map(filename => ({ filename })), merge_base_commit: { sha: 'mb' }, behind_by: 0 })
+  }
+}
+
+const pkgJson = (version: string, name = 'pkg') => JSON.stringify({ name, version }, null, 2) + '\n'
+
 const FEAT: FakeCommit = { hash: 'a'.repeat(40), short: 'aaaaaaa', name: 'Ada', email: 'ada@example.com', subject: 'feat: add a thing (#7)' }
 
 beforeEach(() => {
@@ -445,7 +460,7 @@ describe('lockstep main', () => {
       base: { ref: 'main' },
       updated_at: '2024-01-02T00:00:00Z',
     }]
-    api.branches.set('release/v1.3.0', 'bumped-sha')
+    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.3.0') })
     await main()
     const patch = calls.findLast(c => c.method === 'PATCH' && c.path === '/repos/owner/repo/pulls/9')!
     expect(patch.body).toMatchObject({ title: 'v1.3.0' })
@@ -454,9 +469,10 @@ describe('lockstep main', () => {
   })
 
   it('recovers a release branch that sits at base with no bump', async () => {
-    api.branches.set('release/v1.3.0', 'base-sha')
+    releaseBranch('release/v1.3.0', {})
     await main()
-    expect(calls.some(c => c.method === 'POST' && c.path.endsWith('/git/trees'))).toBe(true)
+    expect(JSON.parse(blobContents()[0]!)).toMatchObject({ version: '1.3.0' })
+    expect(calls).toContainEqual(expect.objectContaining({ method: 'PATCH', path: '/repos/owner/repo/git/refs/heads/release/v1.3.0', body: { sha: 'commit-sha', force: true } }))
   })
 
   it('requires a token to create the release branch', async () => {
@@ -466,7 +482,7 @@ describe('lockstep main', () => {
 
   it('requires a token to create or update the PR', async () => {
     delete process.env.GITHUB_TOKEN
-    api.branches.set('release/v1.3.0', 'bumped-sha')
+    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.3.0') })
     await expect(main()).rejects.toThrow('GITHUB_TOKEN is required to create or update the PR')
   })
 
@@ -494,7 +510,7 @@ describe('lockstep main', () => {
   })
 
   it('propagates an unexpected branch-lookup failure', async () => {
-    api.fail.set('GET /repos/owner/repo/branches/release%2Fv1.3.0', 500)
+    api.fail.set('GET /repos/owner/repo/compare/main...release%2Fv1.3.0', 500)
     await expect(main()).rejects.toThrow(/-> 500/)
   })
 
@@ -596,16 +612,38 @@ describe('lockstep main', () => {
     expect(prBody()).toContain('> newer intro')
   })
 
-  it('propagates a transient failure while resolving the release branch parent', async () => {
-    api.branches.set('release/v1.3.0', 'base-sha')
-    api.failNth.set('GET /repos/owner/repo/branches/release%2Fv1.3.0', { nth: 2, status: 500 })
-    await expect(main()).rejects.toThrow(/-> 500/)
-  })
-
   it('creates the release branch when it does not exist yet', async () => {
     await main()
     const createRef = calls.find(c => c.method === 'POST' && c.path.endsWith('/git/refs'))!
-    expect(createRef.body).toMatchObject({ ref: 'refs/heads/release/v1.3.0', sha: 'base-sha' })
+    expect(createRef.body).toMatchObject({ ref: 'refs/heads/release/v1.3.0', sha: 'commit-sha' })
+  })
+})
+
+describe('lockstep main with a conflicting release branch', () => {
+  it.each(['{ not json', '{ "name": "pkg" }'])('rebuilds a branch whose manifest has no readable version: %s', async (manifest) => {
+    releaseBranch('release/v1.3.0', { 'package.json': manifest })
+    await main()
+    expect(JSON.parse(blobContents()[0]!)).toMatchObject({ version: '1.3.0' })
+  })
+
+  it('rebuilds on base, keeping the version', async () => {
+    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.3.0') }, { behindBy: 2, baseChanged: ['package.json'] })
+    await main()
+    expect(JSON.parse(blobContents()[0]!)).toMatchObject({ version: '1.3.0' })
+    expect(calls).toContainEqual(expect.objectContaining({ path: '/repos/owner/repo/git/commits', body: expect.objectContaining({ parents: ['base-sha'] }) }))
+    expect(calls).toContainEqual(expect.objectContaining({ method: 'PATCH', path: '/repos/owner/repo/git/refs/heads/release/v1.3.0', body: { sha: 'commit-sha', force: true } }))
+  })
+
+  it('leaves a branch with other changes, and its PR, alone', async () => {
+    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.3.0') }, {
+      behindBy: 1,
+      baseChanged: ['package.json'],
+      extra: [{ filename: 'NOTES.md' }],
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await main()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('without discarding its changes to NOTES.md'))
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([])
   })
 })
 

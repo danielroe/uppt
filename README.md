@@ -145,6 +145,8 @@ jobs:
 
 > [!TIP]
 > You can edit the release PR to add your own release notes. Anything above `## 👉 Changelog` is preserved when the changelog is updated.
+>
+> If base changes a manifest the release PR also bumps, the next run rebases the PR onto it, keeping its version. A release branch carrying other changes is left for you to update.
 
 ### Inputs
 

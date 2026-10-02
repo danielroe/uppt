@@ -722,29 +722,6 @@ async function upsertReleasePR (
   }
 }
 
-type ReleaseBranchState = 'missing' | 'at-base' | 'has-bump'
-
-async function getReleaseBranchState (
-  repo: { owner: string, repo: string },
-  opts: { base: string, branch: string },
-): Promise<ReleaseBranchState> {
-  let branchHead: string
-  try {
-    const data = await gh<{ commit: { sha: string } }>(
-      `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.branch)}`,
-    )
-    branchHead = data.commit.sha
-  } catch (err) {
-    if (err instanceof Error && /-> 404\b/.test(err.message)) return 'missing'
-    throw err
-  }
-
-  const baseInfo = await gh<{ commit: { sha: string } }>(
-    `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.base)}`,
-  )
-  return branchHead === baseInfo.commit.sha ? 'at-base' : 'has-bump'
-}
-
 /** Create a tree layering `files` over `baseTree`, returning its sha. */
 async function createTree (
   repo: { owner: string, repo: string },
@@ -785,69 +762,6 @@ interface FileToCommit {
   content: string
 }
 
-/**
- * Land one atomic commit on `opts.branch` containing every file in
- * `opts.files`, using the Git Data API. Creates the branch at `opts.base`
- * if it doesn't exist yet. The resulting commit has the branch's current
- * tip as its sole parent (or `opts.base`'s tip, if the branch was just
- * created), so the ref fast-forwards.
- */
-async function commitFilesToBranch (
-  repo: { owner: string, repo: string },
-  opts: { base: string, branch: string, message: string, files: FileToCommit[] },
-): Promise<void> {
-  /* v8 ignore next 3 -- unreachable: every caller derives `files` from a
-     non-empty release plan. Kept because the ref update below moves a branch,
-     and an empty file set would move it to a commit with no changes. */
-  if (!opts.files.length) {
-    throw new Error('commitFilesToBranch: refusing to commit with no files')
-  }
-
-  let parentSha: string
-  try {
-    const branchInfo = await gh<{ commit: { sha: string } }>(
-      `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.branch)}`,
-    )
-    parentSha = branchInfo.commit.sha
-  } catch (err) {
-    if (!(err instanceof Error) || !/-> 404\b/.test(err.message)) throw err
-    const baseInfo = await gh<{ commit: { sha: string } }>(
-      `/repos/${repo.owner}/${repo.repo}/branches/${encodeURIComponent(opts.base)}`,
-    )
-    await gh(`/repos/${repo.owner}/${repo.repo}/git/refs`, {
-      method: 'POST',
-      body: JSON.stringify({
-        ref: `refs/heads/${opts.branch}`,
-        sha: baseInfo.commit.sha,
-      }),
-    })
-    parentSha = baseInfo.commit.sha
-  }
-
-  const parentCommit = await gh<{ tree: { sha: string } }>(
-    `/repos/${repo.owner}/${repo.repo}/git/commits/${parentSha}`,
-  )
-
-  const tree = await createTree(repo, parentCommit.tree.sha, opts.files)
-
-  const commit = await gh<{ sha: string }>(
-    `/repos/${repo.owner}/${repo.repo}/git/commits`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        message: opts.message,
-        tree,
-        parents: [parentSha],
-      }),
-    },
-  )
-
-  await gh(`/repos/${repo.owner}/${repo.repo}/git/refs/heads/${opts.branch}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ sha: commit.sha }),
-  })
-}
-
 export interface BranchDivergence {
   /** Files the branch changes relative to its merge base with the target base. */
   changed: Set<string>
@@ -873,17 +787,22 @@ export function releaseBranchDrift (opts: {
   branchContents: Map<string, string | null>
   /** Desired paths that base has changed since the merge base. */
   baseTouched: string[]
+  keepOtherChanges?: boolean
+  /** Defaults to exact equality. */
+  isCurrent?: (branch: string | null, desired: string) => boolean
 }): string | null {
   if (!opts.divergence) return 'branch does not exist'
 
   const desiredPaths = [...opts.desired.keys()]
   const changed = opts.divergence.changed
-  if (changed.size !== desiredPaths.length || desiredPaths.some(path => !changed.has(path))) {
+  const missing = desiredPaths.some(path => !changed.has(path))
+  if (missing || (!opts.keepOtherChanges && changed.size !== desiredPaths.length)) {
     return `branch changes ${[...changed].join(', ') || 'nothing'}, plan changes ${desiredPaths.join(', ')}`
   }
 
+  const isCurrent = opts.isCurrent ?? ((branch, desired) => branch === desired)
   for (const path of desiredPaths) {
-    if (opts.branchContents.get(path) !== opts.desired.get(path)) return `${path} differs from the plan`
+    if (!isCurrent(opts.branchContents.get(path)!, opts.desired.get(path)!)) return `${path} differs from the plan`
   }
 
   if (opts.baseTouched.length) return `base has since changed ${opts.baseTouched.join(', ')}`
@@ -892,26 +811,33 @@ export function releaseBranchDrift (opts: {
 }
 
 /**
- * Make `opts.branch` carry exactly `opts.files` as its diff against
- * `opts.base`, rebuilding it as a single commit on the base tip only when
- * that isn't already true (see `releaseBranchDrift`). A rebuild always
+ * Make `opts.branch` carry `opts.files` as its diff against `opts.base`,
+ * rebuilding it as a single commit on the base tip only when that isn't
+ * already true (see `releaseBranchDrift`). With `keepOtherChanges`, a branch
+ * that also changes other files is never rebuilt. A rebuild always
  * force-updates the ref straight to the new commit rather than resetting to
  * base first: a branch that momentarily equals its base makes GitHub close
  * the open PR as having nothing to merge.
  */
 async function syncReleaseBranch (
   repo: { owner: string, repo: string },
-  opts: { base: string, branch: string, message: string, files: FileToCommit[] },
-): Promise<void> {
-  /* v8 ignore next 3 -- unreachable: `runIndependent` returns early on an
-     empty plan. Kept because the divergent path below force-updates the
-     release branch, so an empty file set would discard it. */
+  opts: {
+    base: string
+    branch: string
+    message: string
+    files: FileToCommit[]
+    keepOtherChanges?: boolean
+    isCurrent?: (branch: string | null, desired: string) => boolean
+  },
+): Promise<boolean> {
+  /* v8 ignore next 3 -- unreachable: every caller derives `files` from a
+     non-empty release plan. Kept because the divergent path below
+     force-updates the release branch, so an empty file set would discard it. */
   if (!opts.files.length) {
     throw new Error('syncReleaseBranch: refusing to commit with no files')
   }
 
   const desired = new Map(opts.files.map(file => [file.path, file.content]))
-  const desiredPaths = [...desired.keys()]
 
   let divergence: BranchDivergence | null = null
   try {
@@ -930,7 +856,7 @@ async function syncReleaseBranch (
   const branchContents = new Map<string, string | null>()
   const baseTouched: string[] = []
   if (divergence) {
-    for (const path of desiredPaths) {
+    for (const path of desired.keys()) {
       branchContents.set(path, await getFileContent(repo, path, opts.branch))
     }
     if (divergence.behindBy > 0) {
@@ -943,10 +869,26 @@ async function syncReleaseBranch (
     }
   }
 
-  const drift = releaseBranchDrift({ divergence, desired, branchContents, baseTouched })
+  const drift = releaseBranchDrift({
+    divergence,
+    desired,
+    branchContents,
+    baseTouched,
+    keepOtherChanges: opts.keepOtherChanges,
+    isCurrent: opts.isCurrent,
+  })
   if (!drift) {
     console.log(`Branch ${opts.branch} already carries the release plan; leaving it untouched.`)
-    return
+    return true
+  }
+
+  const others = opts.keepOtherChanges ? [...divergence?.changed ?? []].filter(path => !desired.has(path)) : []
+  if (others.length) {
+    console.warn(`Cannot rebuild ${opts.branch} (${drift}) without discarding its changes to ${others.join(', ')}.`)
+    return false
+  }
+  if (!process.env.GITHUB_TOKEN) {
+    throw new Error('GITHUB_TOKEN is required to create the release branch')
   }
   console.log(`Rebuilding ${opts.branch} on ${opts.base}: ${drift}`)
 
@@ -978,6 +920,7 @@ async function syncReleaseBranch (
       body: JSON.stringify({ ref: `refs/heads/${opts.branch}`, sha: commit.sha }),
     })
   }
+  return true
 }
 
 async function getFileContent (
@@ -1091,6 +1034,15 @@ export function stripPlaceholderTimetable (body: string): string {
   return body
     .replaceAll(`\n>\n${TIMETABLE_PLACEHOLDER}`, '')
     .replaceAll(`\n${TIMETABLE_PLACEHOLDER}`, '')
+}
+
+function readVersion (source: string | null): string | undefined {
+  try {
+    const version = (JSON.parse(source!) as { version?: unknown }).version
+    return typeof version === 'string' ? version : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function propagationCauses (release: PackageRelease, releasedNames: Set<string>): string[] {
@@ -1257,31 +1209,17 @@ export async function main () {
   }
 
   if (!dryRun) {
-    const state = await getReleaseBranchState(repo, {
+    const synced = await syncReleaseBranch(repo, {
       base: baseBranch,
       branch: releaseBranch,
+      message: `v${newVersion}`,
+      files: buildBumpFileSet({ monorepo, workspaces, rootPkg, rootPkgSource, currentVersion, newVersion }),
+      keepOtherChanges: true,
+      isCurrent: branch => readVersion(branch) === newVersion,
     })
-    if (state !== 'has-bump') {
-      if (!process.env.GITHUB_TOKEN) {
-        throw new Error('GITHUB_TOKEN is required to create the release branch')
-      }
-      if (state === 'at-base') {
-        console.log(`Branch ${releaseBranch} exists at base HEAD with no bump; recovering by committing.`)
-      }
-      const files = buildBumpFileSet({
-        monorepo,
-        workspaces,
-        rootPkg,
-        rootPkgSource,
-        currentVersion,
-        newVersion,
-      })
-      await commitFilesToBranch(repo, {
-        base: baseBranch,
-        branch: releaseBranch,
-        message: `v${newVersion}`,
-        files,
-      })
+    if (!synced) {
+      console.warn(`Leaving the release PR for ${releaseBranch} unchanged until the branch can be rebuilt.`)
+      return
     }
   }
 
@@ -1417,9 +1355,6 @@ async function runIndependent (packagesInput: string): Promise<void> {
   }
 
   if (!dryRun) {
-    if (!process.env.GITHUB_TOKEN) {
-      throw new Error('GITHUB_TOKEN is required to create the release branch')
-    }
     // The pending branch name never changes, but the plan behind it does
     // (packages join and drop as commits land on base), so the branch has to
     // end up carrying exactly the current plan and nothing stale.
