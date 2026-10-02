@@ -34,7 +34,7 @@ import { resolve } from 'node:path'
 import { runMain } from './_cli.ts'
 import { makePkgFormatter } from './pkg-format.ts'
 
-import { buildScopeMap, isPrerelease, parseScopesInput, resolveCurrentVersion, resolveWorkspaces, type Workspace } from './_workspaces.ts'
+import { buildScopeMap, isPrerelease, parseScopesInput, prereleaseIdentifier, resolveCurrentVersion, resolveWorkspaces, type Workspace } from './_workspaces.ts'
 import { buildDependencyGraph, DEPENDENCY_FIELDS, propagateReleases, type BumpLevel } from './_dependency-graph.ts'
 
 export interface Commit {
@@ -884,7 +884,7 @@ async function syncReleaseBranch (
 
   const others = opts.keepOtherChanges ? [...divergence?.changed ?? []].filter(path => !desired.has(path)) : []
   if (others.length) {
-    console.warn(`Cannot rebuild ${opts.branch} (${drift}) without discarding its changes to ${others.join(', ')}.`)
+    console.log(`::warning::Cannot rebuild ${opts.branch} (${drift}) without discarding its changes to ${others.join(', ')}.`)
     return false
   }
   if (!process.env.GITHUB_TOKEN) {
@@ -1068,8 +1068,11 @@ export function resolvePinnedVersion (opts: {
   branchVersions: Array<string | undefined>
   currentVersion: string
   prerelease: boolean
+  /** Prerelease identifier of this run; a branch named for another identifier is not pinned. */
+  identifier?: string
 }): string | null {
   const nameVersion = opts.headRef.slice('release/v'.length)
+  if (opts.identifier !== undefined && prereleaseIdentifier(nameVersion) !== opts.identifier) return null
   const edited = [...new Set(opts.branchVersions.filter((v): v is string => typeof v === 'string' && v !== nameVersion))]
   if (edited.length > 1) {
     console.warn(`Ignoring hand-edited versions on ${opts.headRef}: manifests disagree (${edited.join(', ')}).`)
@@ -1108,6 +1111,14 @@ async function findTrackReleasePR (
     )
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
   return pr && { number: pr.number, head: pr.head.ref }
+}
+
+function sameManifest (a: string | null, b: string): boolean {
+  try {
+    return JSON.stringify(JSON.parse(a!)) === JSON.stringify(JSON.parse(b))
+  } catch {
+    return false
+  }
 }
 
 function readVersion (source: string | null): string | undefined {
@@ -1263,8 +1274,12 @@ export async function main () {
       branchVersions,
       currentVersion,
       prerelease: Boolean(prerelease),
+      identifier: prerelease ?? '',
     })
     if (version) pinned = { version, pr: trackPR }
+  }
+  if (pinned && compareVersions(computedVersion.split('-')[0]!, pinned.version.split('-')[0]!) > 0) {
+    console.log(`::warning::Unreleased commits call for v${computedVersion}, above the hand-set v${pinned.version} on #${pinned.pr.number}.`)
   }
 
   const newVersion = pinned?.version ?? computedVersion
@@ -1308,10 +1323,10 @@ export async function main () {
       message: `v${newVersion}`,
       files: buildBumpFileSet({ monorepo, workspaces, rootPkg, rootPkgSource, currentVersion, newVersion }),
       keepOtherChanges: true,
-      isCurrent: branch => readVersion(branch) === newVersion,
+      isCurrent: (branch, desired) => sameManifest(branch, desired),
     })
     if (!synced) {
-      console.warn(`Leaving the release PR for ${releaseBranch} unchanged until the branch can be rebuilt.`)
+      console.log(`::warning::Leaving the release PR for ${releaseBranch} unchanged until the branch can be rebuilt.`)
       return
     }
   }

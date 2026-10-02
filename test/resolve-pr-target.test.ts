@@ -3,19 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import process from 'node:process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { main, prereleaseIdentifier } from '../scripts/resolve-pr-target.ts'
-
-describe('prereleaseIdentifier', () => {
-  it.each([
-    ['1.3.0', ''],
-    ['5.0.0-beta.0', 'beta'],
-    ['5.0.0-rc', 'rc'],
-    ['5.0.0-alpha.1.2', 'alpha.1'],
-    ['5.0.0-3', '0'],
-  ])('%s -> %j', (version, id) => {
-    expect(prereleaseIdentifier(version)).toBe(id)
-  })
-})
+import { main } from '../scripts/resolve-pr-target.ts'
 
 describe('main', () => {
   let env: NodeJS.ProcessEnv
@@ -75,6 +63,13 @@ describe('main', () => {
     delete process.env.GITHUB_TOKEN
     await main()
     expect(readFileSync(output, 'utf8')).toBe('skip=true\nbase=\nprerelease=\n')
+  })
+
+  it('skips a pushed release branch with an invalid prerelease identifier', async () => {
+    process.env.GITHUB_REF = 'refs/heads/release/v1.3.0-Beta.1'
+    await main()
+    expect(readFileSync(output, 'utf8')).toBe('skip=true\nbase=\nprerelease=\n')
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('throws when the PR lookup fails', async () => {

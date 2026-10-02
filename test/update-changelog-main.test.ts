@@ -640,7 +640,9 @@ describe('lockstep main with a hand-edited version', () => {
     git.commits = [{ ...FEAT, subject: 'feat!: break a thing (#7)' }]
     openReleasePR('release/v2.0.0', '> v2.0.0 is the next major release.\n\n## 👉 Changelog\n\nstuff')
     releaseBranch('release/v2.0.0', { 'package.json': pkgJson('1.2.4') })
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     await main()
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('::warning::Unreleased commits call for v2.0.0, above the hand-set v1.2.4'))
     expect(prUpdate().title).toBe('v1.2.4')
     expect(prBody()).toContain('> v1.2.4 is the next patch release.')
   })
@@ -664,6 +666,13 @@ describe('lockstep main with a hand-edited version', () => {
     releaseBranch('release/v1.3.0', { 'package.json': manifest })
     await main()
     expect(JSON.parse(blobContents()[0]!)).toMatchObject({ version: '1.3.0' })
+  })
+
+  it('rebuilds a pinned manifest whose other fields are stale', async () => {
+    openReleasePR('release/v1.3.0')
+    releaseBranch('release/v1.3.0', { 'package.json': JSON.stringify({ name: 'pkg', version: '1.5.0', private: true }) })
+    await main()
+    expect(JSON.parse(blobContents()[0]!)).toEqual({ name: 'pkg', version: '1.5.0' })
   })
 
   it('resets an edited version that is not above the current one', async () => {
@@ -693,9 +702,10 @@ describe('lockstep main with a conflicting release branch', () => {
       baseChanged: ['package.json'],
       extra: [{ filename: 'NOTES.md' }],
     })
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     await main()
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('without discarding its changes to NOTES.md'))
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('::warning::Cannot rebuild release/v1.3.0'))
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('::warning::Leaving the release PR'))
     expect(calls.filter(c => c.method !== 'GET')).toEqual([])
   })
 })

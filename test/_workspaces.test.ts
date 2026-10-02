@@ -10,6 +10,7 @@ import {
   lockstepVersionFromWorkspaces,
   parsePackagesInput,
   parseScopesInput,
+  prereleaseIdentifier,
   resolveCurrentVersion,
   resolveWorkspaces,
 } from '../scripts/_workspaces.ts'
@@ -417,5 +418,17 @@ describe('buildScopeMap', () => {
       { workspace: workspaces[0], scopes: ['alpha', 'a'] },
       { workspace: workspaces[1], scopes: ['b'] },
     ])
+  })
+})
+
+describe('prereleaseIdentifier', () => {
+  it.each([
+    ['1.3.0', ''],
+    ['5.0.0-beta.0', 'beta'],
+    ['5.0.0-rc', 'rc'],
+    ['5.0.0-alpha.1.2', 'alpha.1'],
+    ['5.0.0-3', '0'],
+  ])('%s -> %j', (version, id) => {
+    expect(prereleaseIdentifier(version)).toBe(id)
   })
 })

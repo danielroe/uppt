@@ -1022,6 +1022,11 @@ describe('resolvePinnedVersion', () => {
     expect(resolvePinnedVersion({ headRef: 'release/v1.3.0-beta.9', currentVersion: '1.3.0-beta.1', prerelease: true, branchVersions: [version] })).toBeNull()
   })
 
+  it('ignores a branch named for another prerelease identifier', () => {
+    expect(resolvePinnedVersion({ headRef: 'release/v1.3.0-alpha.0', currentVersion: '1.2.3', prerelease: true, identifier: 'beta', branchVersions: ['1.3.0-alpha.5'] })).toBeNull()
+    expect(resolvePinnedVersion({ headRef: 'release/v1.3.0-alpha.0', currentVersion: '1.2.3', prerelease: true, identifier: 'alpha', branchVersions: ['1.3.0-alpha.5'] })).toBe('1.3.0-alpha.5')
+  })
+
   it('returns null when nothing was edited', () => {
     expect(resolvePinnedVersion({ ...base, branchVersions: ['1.3.0', undefined] })).toBeNull()
   })

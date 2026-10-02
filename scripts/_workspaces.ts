@@ -183,6 +183,14 @@ export function isPrerelease (version: string): boolean {
   return /^\d+\.\d+\.\d+-/.test(version)
 }
 
+/** Identifier that continues the prerelease line of `version`, or `''` for a stable version. */
+export function prereleaseIdentifier (version: string): string {
+  const pre = version.match(/^\d+\.\d+\.\d+-([0-9a-zA-Z.-]+)$/)?.[1]
+  if (!pre) return ''
+  if (/^\d+$/.test(pre)) return '0'
+  return pre.replace(/\.\d+$/, '')
+}
+
 /**
  * Resolve the version uppt should act on, the single place both `uppt/pr`
  * (bump source) and `uppt/release` (tag source) agree on so they can never

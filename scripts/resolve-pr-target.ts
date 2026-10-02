@@ -12,14 +12,7 @@
 import process from 'node:process'
 import { appendFileSync } from 'node:fs'
 import { runMain } from './_cli.ts'
-
-/** Identifier that continues the prerelease line of `version`, or `''` for a stable version. */
-export function prereleaseIdentifier (version: string): string {
-  const pre = version.match(/^\d+\.\d+\.\d+-([0-9a-zA-Z.-]+)$/)?.[1]
-  if (!pre) return ''
-  if (/^\d+$/.test(pre)) return '0'
-  return pre.replace(/\.\d+$/, '')
-}
+import { prereleaseIdentifier } from './_workspaces.ts'
 
 export async function main () {
   const ref = process.env.GITHUB_REF ?? ''
@@ -32,6 +25,13 @@ export async function main () {
   const branch = ref.match(/^refs\/heads\/(release\/v.+)$/)?.[1]
   if (!branch) {
     output({ skip: 'false', base: process.env.BASE_BRANCH ?? '', prerelease: process.env.PRERELEASE ?? '' })
+    return
+  }
+
+  const prerelease = prereleaseIdentifier(branch.slice('release/v'.length))
+  if (prerelease && !/^[a-z0-9][a-z0-9.-]*$/.test(prerelease)) {
+    console.log(`::notice::danielroe/uppt/pr skipped: ${branch} does not carry a valid uppt prerelease identifier.`)
+    output({ skip: 'true', base: '', prerelease: '' })
     return
   }
 
@@ -53,7 +53,7 @@ export async function main () {
     output({ skip: 'true', base: '', prerelease: '' })
     return
   }
-  output({ skip: 'false', base: pr.base.ref, prerelease: prereleaseIdentifier(branch.slice('release/v'.length)) })
+  output({ skip: 'false', base: pr.base.ref, prerelease })
 }
 
 runMain(import.meta.url, main)
