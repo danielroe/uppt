@@ -39,7 +39,8 @@ name: release
 
 on:
   push:
-    branches: [main]
+    # release/v* picks up hand edits to an open release PR
+    branches: [main, 'release/v*']
   pull_request:
     types: [closed]
     branches: [main]
@@ -65,7 +66,10 @@ jobs:
       && (
         (
           github.event_name == 'push'
-          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+          && (
+            github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+            || startsWith(github.ref, 'refs/heads/release/v')
+          )
         ) || (
           github.event_name == 'workflow_dispatch'
           && !startsWith(github.ref, 'refs/tags/')
@@ -146,13 +150,13 @@ jobs:
 > [!TIP]
 > You can edit the release PR to add your own release notes. Anything above `## 👉 Changelog` is preserved when the changelog is updated.
 >
-> To release a different version than the one uppt picked, just change `version` in a `package.json` on the release branch. The next run will update the PR title and changelog to match (and, in a lockstep monorepo, the other manifests), and keep that version on later pushes. The branch keeps its original name.
+> To release a different version than the one uppt picked, just change `version` in a `package.json` on the release branch. On the next run (straight away if your workflow has the `release/v*` push trigger above, otherwise on the next push to the base branch), uppt will update the PR title and changelog to match (and, in a lockstep monorepo, the other manifests), and keep that version on later pushes. The branch keeps its original name.
 >
 > If base changes a manifest the release PR also bumps, the next run rebases the PR onto it, keeping its version. A release branch carrying other changes is left for you to update.
 
 ### Inputs
 
-All subactions take a `node-version` input (default `24`; uppt needs `--experimental-strip-types`, so Node 22.6+ also works) and, where applicable, a `checkout` input (`true` by default; set to `false` if the caller has already checked out the right ref - `fetch-depth: 0` for `pr`, the merge commit for `release`, the tag for `pack`).
+All subactions take a `node-version` input (default `24`; uppt needs `--experimental-strip-types`, so Node 22.6+ also works) and, where applicable, a `checkout` input (`true` by default; set to `false` if the caller has already checked out the right ref - `fetch-depth: 0` for `pr`, on the release PR's base for a `release/v*` push, the merge commit for `release`, the tag for `pack`).
 
 <details>
 <summary><code>uppt/pr</code></summary>

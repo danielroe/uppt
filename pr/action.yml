@@ -12,7 +12,7 @@ inputs:
     required: false
     default: ${{ github.token }}
   base-branch:
-    description: 'Branch the release PR is opened against.'
+    description: 'Branch the release PR is opened against. On a push to a `release/v*` branch, the base of that branch''s open release PR is used instead.'
     required: false
     default: ${{ github.event.repository.default_branch }}
   node-version:
@@ -20,7 +20,7 @@ inputs:
     required: false
     default: '24'
   checkout:
-    description: 'Whether the action should run `actions/checkout` itself. Set to `false` if the caller has already checked out with `fetch-depth: 0`.'
+    description: 'Whether the action should run `actions/checkout` itself. Set to `false` if the caller has already checked out with `fetch-depth: 0` (on the release PR''s base branch, for a push to `release/v*`).'
     required: false
     default: 'true'
   packages:
@@ -66,14 +66,6 @@ runs:
           exit 1
         fi
 
-    - name: Checkout
-      if: steps.guard.outputs.skip != 'true' && inputs.checkout == 'true'
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        fetch-depth: 0
-        token: ${{ inputs.token }}
-        persist-credentials: false
-
     - name: Setup Node
       if: steps.guard.outputs.skip != 'true'
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -81,14 +73,33 @@ runs:
         node-version: ${{ inputs.node-version }}
         package-manager-cache: false
 
-    - name: Update changelog and open/update release PR
+    - name: Resolve release PR target
+      id: target
       if: steps.guard.outputs.skip != 'true'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
-        RELEASE_BASE: ${{ inputs.base-branch }}
-        PACKAGES: ${{ inputs.packages }}
+        BASE_BRANCH: ${{ inputs.base-branch }}
         PRERELEASE: ${{ inputs.prerelease }}
+      run: node --experimental-strip-types ${{ github.action_path }}/../scripts/resolve-pr-target.ts
+
+    - name: Checkout
+      if: steps.guard.outputs.skip != 'true' && steps.target.outputs.skip != 'true' && inputs.checkout == 'true'
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+        ref: ${{ startsWith(github.ref, 'refs/heads/release/v') && steps.target.outputs.base || '' }}
+        token: ${{ inputs.token }}
+        persist-credentials: false
+
+    - name: Update changelog and open/update release PR
+      if: steps.guard.outputs.skip != 'true' && steps.target.outputs.skip != 'true'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        RELEASE_BASE: ${{ steps.target.outputs.base }}
+        PACKAGES: ${{ inputs.packages }}
+        PRERELEASE: ${{ steps.target.outputs.prerelease }}
         MODE: ${{ inputs.mode }}
         SCOPES: ${{ inputs.scopes }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/update-changelog.ts
