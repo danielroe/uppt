@@ -80,7 +80,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: danielroe/uppt/pr@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+      - uses: danielroe/uppt/pr@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: ${{ inputs.prerelease }}
@@ -101,7 +101,7 @@ jobs:
       contents: write
       actions: write
     steps:
-      - uses: danielroe/uppt/release@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+      - uses: danielroe/uppt/release@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -117,7 +117,7 @@ jobs:
       files: ${{ steps.pack.outputs.files }}
     steps:
       - id: pack
-        uses: danielroe/uppt/pack@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+        uses: danielroe/uppt/pack@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
 
   # stage the prebuilt tarball(s) to npm via OIDC
   publish:
@@ -134,7 +134,7 @@ jobs:
       id-token: write
     environment: npm
     steps:
-      - uses: danielroe/uppt/publish@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+      - uses: danielroe/uppt/publish@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
         with:
           files: ${{ needs.pack.outputs.files }}
           npm-tag: ${{ inputs.npm-tag }}
@@ -240,7 +240,7 @@ Nothing else to configure: a release PR merged into a branch other than the defa
 If your line uses a different dist-tag (`legacy`, `v3-latest`), or the release spans majors so there's no single `<major>x` to derive, set `npm-tag` on `uppt/release`:
 
 ```yaml
-- uses: danielroe/uppt/release@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+- uses: danielroe/uppt/release@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
   with:
     npm-tag: legacy
 ```
@@ -275,7 +275,7 @@ jobs:
       files: ${{ steps.pack.outputs.files }}
     steps:
       - id: pack
-        uses: danielroe/uppt/pack@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+        uses: danielroe/uppt/pack@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
         with:
           nightly: true
 
@@ -289,7 +289,7 @@ jobs:
       id-token: write
     environment: nightly
     steps:
-      - uses: danielroe/uppt/publish@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+      - uses: danielroe/uppt/publish@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
         with:
           nightly: true
           files: ${{ needs.pack.outputs.files }}
@@ -306,7 +306,7 @@ jobs:
 - **Bins**: every command gains a `-nightly` copy, plus one named after the package, so `npx <name>-nightly` works.
 
 ```yaml
-- uses: danielroe/uppt/pack@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+- uses: danielroe/uppt/pack@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
   with:
     nightly: true
     packages: packages/*
@@ -404,7 +404,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: danielroe/uppt/pr@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+      - uses: danielroe/uppt/pr@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: ${{ inputs.prerelease }}
@@ -427,7 +427,7 @@ jobs:
       contents: write
       actions: write
     steps:
-      - uses: danielroe/uppt/release@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+      - uses: danielroe/uppt/release@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           mode: independent
@@ -447,7 +447,7 @@ jobs:
       files: ${{ steps.pack.outputs.files }}
     steps:
       - id: pack
-        uses: danielroe/uppt/pack@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+        uses: danielroe/uppt/pack@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
         with:
           releases: ${{ inputs.releases }}
           packages: |
@@ -467,7 +467,7 @@ jobs:
       id-token: write
     environment: npm
     steps:
-      - uses: danielroe/uppt/publish@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+      - uses: danielroe/uppt/publish@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
         with:
           files: ${{ needs.pack.outputs.files }}
           npm-tag: ${{ inputs.npm-tag }}
