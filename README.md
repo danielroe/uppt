@@ -249,7 +249,7 @@ It overrides the derivation, applies to every tarball in the run, and any value 
 
 ## Nightly releases
 
-uppt can also publish a nightly build of every push to a branch, under a separate package name (`@nuxt/test-utils` → `@nuxt/test-utils-nightly`). Nightlies skip the release PR and staging: they publish straight to npm via OIDC, so add a trusted publisher for each nightly package pointing at the workflow below, with 'Environment name' set to `nightly` (no `npm stage publish` permission needed).
+uppt can also publish a nightly build of every push to a branch, under a separate package name (`@nuxt/test-utils` → `@nuxt/test-utils-nightly`). Nightlies skip the release PR and staging: they publish straight to npm via OIDC, so add a trusted publisher for each nightly package pointing at the workflow below, with 'Environment name' set to `nightly` (no `npm stage publish` permission needed). As with stable releases, each nightly package must already exist on npm before you can attach a trusted publisher to it, so publish a stub first (for example with `npx setup-trusted-publishing`).
 
 Create a matching `nightly` [GitHub environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments) and limit its deployment branches to the branch(es) you publish nightlies from (e.g. `main`). Without approvals or staging, this is what stops a workflow run on any other ref from publishing.
 
@@ -300,7 +300,7 @@ jobs:
 `uppt/pack` rewrites each package before packing it:
 
 - **Name**: `<name>-nightly`. Set `nightly-suffix` to use something else (`-edge`).
-- **Version**: `<version>-<YYMMDDHHmm>-<sha>`, e.g. `3.20.1-2605140905-a1b2c3d`. `<version>` is the `X.Y.Z` part of the version in `package.json`, the timestamp is the HEAD commit's date in UTC, and `<sha>` is its 7-character short hash. Newer commits always sort higher.
+- **Version**: `<version>-<YYMMDDHHmm>-<sha>`, e.g. `3.20.1-2605140905-a1b2c3d`. `<version>` is the `X.Y.Z` part of the version in `package.json`, the timestamp is the HEAD commit's date in UTC, and `<sha>` is its 7-character short hash. Newer commits always sort higher. Publishing a commit whose nightly is already on npm (for example, a re-run) logs a warning and skips the package rather than failing.
 - **Workspace dependencies**: in a monorepo (pass the same `packages` input), dependencies between listed packages become `npm:<name>-nightly@<version>`, so each nightly installs the other nightlies from the same commit.
 - **External nightlies**: `nightly-aliases` points dependencies on packages from other repos at their own nightlies.
 - **Bins**: every command gains a `-nightly` copy, plus one named after the package, so `npx <name>-nightly` works.

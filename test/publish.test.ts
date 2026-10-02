@@ -5,7 +5,8 @@ import process from 'node:process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const execFileSync = vi.hoisted(() => vi.fn())
-vi.mock('node:child_process', () => ({ execFileSync }))
+const spawnSync = vi.hoisted(() => vi.fn())
+vi.mock('node:child_process', () => ({ execFileSync, spawnSync }))
 
 const { main, distTag, versionFromTarballName } = await import('../scripts/publish.ts')
 
@@ -16,7 +17,7 @@ function fixture (files: string[]): string {
 }
 
 function npmArgs () {
-  return execFileSync.mock.calls.map(([, args]) => args as string[])
+  return [...execFileSync.mock.calls, ...spawnSync.mock.calls].map(([, args]) => args as string[])
 }
 
 let env: NodeJS.ProcessEnv
@@ -25,11 +26,13 @@ beforeEach(() => {
   env = { ...process.env }
   for (const key of ['NPM_ACCESS', 'NPM_TAG', 'TARBALL_DIR', 'TARBALL_FILES', 'RELEASES', 'NIGHTLY']) delete process.env[key]
   vi.spyOn(console, 'log').mockImplementation(() => {})
+  spawnSync.mockReturnValue({ status: 0, stderr: '' })
 })
 
 afterEach(() => {
   process.env = env
   execFileSync.mockReset()
+  spawnSync.mockReset()
   vi.restoreAllMocks()
 })
 
@@ -133,6 +136,40 @@ describe('publish', () => {
     process.env.TARBALL_DIR = fixture(['a-nightly-1.0.1-2605140905-0123456.tgz'])
     main()
     expect(npmArgs()[0]).toContain('--tag=5x')
+  })
+
+  it('skips a nightly that npm rejects with E403', () => {
+    process.env.NIGHTLY = 'true'
+    process.env.TARBALL_DIR = fixture(['a-nightly-1.0.1-2605140905-0123456.tgz', 'b-nightly-1.0.1-2605140905-0123456.tgz'])
+    spawnSync.mockReturnValueOnce({ status: 1, stderr: 'npm error code E403\n' })
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    main()
+    expect(npmArgs()).toHaveLength(2)
+    expect(stderr).toHaveBeenCalledWith('npm error code E403\n')
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('::warning::npm publish of'))
+  })
+
+  it('throws on other nightly publish failures', () => {
+    process.env.NIGHTLY = 'true'
+    process.env.TARBALL_DIR = fixture(['a-nightly-1.0.1-2605140905-0123456.tgz'])
+    spawnSync.mockReturnValueOnce({ status: 1, stderr: 'npm error code E404\n' })
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    expect(() => main()).toThrow(/Command failed: npm publish .* \(exit 1\)/)
+  })
+
+  it('throws when a nightly publish is killed', () => {
+    process.env.NIGHTLY = 'true'
+    process.env.TARBALL_DIR = fixture(['a-nightly-1.0.1-2605140905-0123456.tgz'])
+    spawnSync.mockReturnValueOnce({ status: null, signal: 'SIGTERM', stderr: '' })
+    expect(() => main()).toThrow(/\(exit SIGTERM\)/)
+  })
+
+  it('throws when npm cannot be spawned', () => {
+    process.env.NIGHTLY = 'true'
+    process.env.TARBALL_DIR = fixture(['a-nightly-1.0.1-2605140905-0123456.tgz'])
+    spawnSync.mockReturnValueOnce({ status: null, error: new Error('spawn npm ENOENT') })
+    expect(() => main()).toThrow('spawn npm ENOENT')
   })
 
   it('refuses to combine nightlies with RELEASES', () => {

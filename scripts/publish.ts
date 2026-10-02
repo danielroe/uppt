@@ -34,7 +34,7 @@
 //                   `latest` by default) instead of staging
 
 import process from 'node:process'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -45,6 +45,20 @@ import { isSemver } from './_workspaces.ts'
 function run (cmd: string, args: string[]) {
   console.log('$', cmd, ...args)
   execFileSync(cmd, args, { stdio: 'inherit' })
+}
+
+/** `run`, but an E403 (such as a nightly of the same commit already on npm) only warns. */
+function runTolerating403 (cmd: string, args: string[]) {
+  console.log('$', cmd, ...args)
+  const result = spawnSync(cmd, args, { stdio: ['inherit', 'inherit', 'pipe'], encoding: 'utf8' })
+  if (result.stderr) process.stderr.write(result.stderr)
+  if (result.error) throw result.error
+  if (result.status === 0) return
+  if (/\bE403\b/.test(result.stderr)) {
+    console.log(`::warning::npm ${args[0]} of ${args[1]} returned E403; skipping it (is this version already published?).`)
+    return
+  }
+  throw new Error(`Command failed: ${cmd} ${args.join(' ')} (exit ${result.status ?? result.signal})`)
 }
 
 function parseTarballFiles (raw: string): string[] {
@@ -141,7 +155,8 @@ export function main () {
     if (!existsSync(tarballPath)) {
       throw new Error(`Tarball '${tarball}' is not present in ${dir}`)
     }
-    run('npm', [...command, tarballPath, '--provenance', '--ignore-scripts', `--access=${access}`, `--tag=${tagFor(tarball, defaultTag)}`])
+    const publish = nightly ? runTolerating403 : run
+    publish('npm', [...command, tarballPath, '--provenance', '--ignore-scripts', `--access=${access}`, `--tag=${tagFor(tarball, defaultTag)}`])
   }
 }
 
