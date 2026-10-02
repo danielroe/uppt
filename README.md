@@ -261,7 +261,8 @@ jobs:
   pack:
     if: '!github.event.repository.fork'
     runs-on: ubuntu-latest
-    permissions: {}
+    permissions:
+      contents: read
     outputs:
       files: ${{ steps.pack.outputs.files }}
     steps:
