@@ -9,7 +9,7 @@ vi.mock('node:child_process', () => ({ execFileSync }))
 
 const { main } = await import('../scripts/pack.ts')
 
-const PACK_ENV = ['GITHUB_REF', 'RELEASES', 'PACK_OUT_DIR', 'PACKAGES', 'GITHUB_OUTPUT'] as const
+const PACK_ENV = ['GITHUB_REF', 'RELEASES', 'PACK_OUT_DIR', 'PACKAGES', 'GITHUB_OUTPUT', 'NIGHTLY', 'NIGHTLY_SUFFIX', 'NIGHTLY_ALIASES'] as const
 
 let env: NodeJS.ProcessEnv
 let cwd: string
@@ -155,6 +155,41 @@ describe('pack', () => {
     it('throws when an entry does not match the package.json on disk', () => {
       writePkg(resolve(root, 'packages/kit'), { name: '@nuxt/kit', version: '4.0.0' })
       expect(() => main()).toThrow(/does not match/)
+    })
+  })
+
+  describe('nightly mode', () => {
+    beforeEach(() => {
+      process.env.NIGHTLY = 'true'
+      process.env.GITHUB_REF = 'refs/heads/main'
+    })
+
+    it('rewrites the package before packing it', () => {
+      process.env.NIGHTLY_SUFFIX = '-edge'
+      process.env.NIGHTLY_ALIASES = 'nuxi'
+      writePkg(root, { name: 'root-pkg', version: '1.2.3', dependencies: { nuxi: '^3' } })
+      const packed = vi.fn()
+      execFileSync.mockImplementation((cmd: string) => {
+        if (cmd === 'git') return '0123456789abcdef 1778749542'
+        packed(JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')))
+        const filename = 'root-pkg-edge-1.2.3-2605140905-0123456.tgz'
+        writeFileSync(resolve(outDir, filename), 'tarball')
+        return `{"filename":"${filename}"}`
+      })
+      main()
+      expect(packed).toHaveBeenCalledWith({ name: 'root-pkg-edge', version: '1.2.3-2605140905-0123456', dependencies: { nuxi: 'npm:nuxi-edge@latest' } })
+    })
+
+    it('requires a branch ref', () => {
+      process.env.GITHUB_REF = 'refs/tags/v1.2.3'
+      expect(() => main()).toThrow(/must be a 'refs\/heads\/\*' branch/)
+      delete process.env.GITHUB_REF
+      expect(() => main()).toThrow(/got '<unset>'/)
+    })
+
+    it('cannot be combined with RELEASES', () => {
+      process.env.RELEASES = JSON.stringify([{ name: 'root-pkg', version: '1.2.3', dir: '.' }])
+      expect(() => main()).toThrow(/RELEASES cannot be combined with NIGHTLY/)
     })
   })
 })

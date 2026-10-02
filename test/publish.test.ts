@@ -23,7 +23,7 @@ let env: NodeJS.ProcessEnv
 
 beforeEach(() => {
   env = { ...process.env }
-  for (const key of ['NPM_ACCESS', 'NPM_TAG', 'TARBALL_DIR', 'TARBALL_FILES', 'RELEASES']) delete process.env[key]
+  for (const key of ['NPM_ACCESS', 'NPM_TAG', 'TARBALL_DIR', 'TARBALL_FILES', 'RELEASES', 'NIGHTLY']) delete process.env[key]
   vi.spyOn(console, 'log').mockImplementation(() => {})
 })
 
@@ -118,6 +118,28 @@ describe('publish', () => {
     process.env.TARBALL_DIR = fixture([])
     process.env.TARBALL_FILES = '["a-1.0.0.tgz"]'
     expect(() => main()).toThrow(/Tarball 'a-1\.0\.0\.tgz' is not present/)
+  })
+
+  it('publishes nightlies directly to latest', () => {
+    process.env.NIGHTLY = 'true'
+    process.env.TARBALL_DIR = fixture(['a-nightly-1.0.1-2605140905-0123456.tgz'])
+    main()
+    expect(npmArgs()[0]).toEqual(['publish', resolve(process.env.TARBALL_DIR, 'a-nightly-1.0.1-2605140905-0123456.tgz'), '--provenance', '--ignore-scripts', '--access=public', '--tag=latest'])
+  })
+
+  it('publishes nightlies to an overridden dist-tag', () => {
+    process.env.NIGHTLY = 'true'
+    process.env.NPM_TAG = '5x'
+    process.env.TARBALL_DIR = fixture(['a-nightly-1.0.1-2605140905-0123456.tgz'])
+    main()
+    expect(npmArgs()[0]).toContain('--tag=5x')
+  })
+
+  it('refuses to combine nightlies with RELEASES', () => {
+    process.env.NIGHTLY = 'true'
+    process.env.TARBALL_DIR = fixture([])
+    process.env.RELEASES = JSON.stringify([{ name: 'a', version: '1.0.0', dir: '.' }])
+    expect(() => main()).toThrow(/RELEASES cannot be combined with NIGHTLY/)
   })
 
   it('stages prereleases under the prerelease identifier', () => {

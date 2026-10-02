@@ -27,6 +27,18 @@ inputs:
     description: 'Independent-mode publish payload: the ordered JSON array of `{ name, version, dir }` entries emitted by `uppt/release` and delivered via the workflow''s `releases` dispatch input. Never set by hand. When present, exactly those workspaces are packed, in that order, and the run must be on the matching `release-YYYY-MM-DD` coordination tag.'
     required: false
     default: ''
+  nightly:
+    description: 'Set to `true` to pack nightly builds of the current branch instead of a release tag. Each package is renamed to `<name><nightly-suffix>` and versioned `<version>-<YYMMDDHHmm>-<sha7>` from the HEAD commit, and dependencies between listed packages are pinned to their nightlies. Pair with `nightly: true` on `uppt/publish`.'
+    required: false
+    default: 'false'
+  nightly-suffix:
+    description: 'Suffix appended to every package name for nightly builds.'
+    required: false
+    default: '-nightly'
+  nightly-aliases:
+    description: 'Newline-separated dependencies from outside the repo to point at their own nightly builds. A bare name (`nuxi`) becomes `npm:nuxi<nightly-suffix>@latest`; `<name>: <target>[@<range>]` sets the target explicitly (`@nuxt/cli: @nuxt/cli-nightly@5x`). Applies to `dependencies` and `optionalDependencies`.'
+    required: false
+    default: ''
 
 outputs:
   files:
@@ -41,6 +53,7 @@ runs:
       env:
         EVENT_NAME: ${{ github.event_name }}
         RELEASES: ${{ inputs.releases }}
+        NIGHTLY: ${{ inputs.nightly }}
       run: |
         set -euo pipefail
         case "$EVENT_NAME" in
@@ -50,7 +63,12 @@ runs:
             exit 1
             ;;
         esac
-        if [ -n "${RELEASES:-}" ]; then
+        if [ "${NIGHTLY:-}" = "true" ]; then
+          if [ "${GITHUB_REF:-}" = "${GITHUB_REF#refs/heads/}" ]; then
+            echo "::error::danielroe/uppt/pack with 'nightly: true' expected a 'refs/heads/*' ref, got '${GITHUB_REF:-<unset>}'."
+            exit 1
+          fi
+        elif [ -n "${RELEASES:-}" ]; then
           if ! printf '%s' "${GITHUB_REF:-}" | grep -Eq '^refs/tags/release-[0-9]{4}-[0-9]{2}-[0-9]{2}(\.[0-9]+)?$'; then
             echo "::error::danielroe/uppt/pack got a 'releases' payload but the ref is not a 'refs/tags/release-YYYY-MM-DD' coordination tag (got '${GITHUB_REF:-<unset>}')."
             exit 1
@@ -115,6 +133,9 @@ runs:
         PACK_OUT_DIR: ${{ runner.temp }}/uppt-pack
         PACKAGES: ${{ inputs.packages }}
         RELEASES: ${{ inputs.releases }}
+        NIGHTLY: ${{ inputs.nightly }}
+        NIGHTLY_SUFFIX: ${{ inputs.nightly-suffix }}
+        NIGHTLY_ALIASES: ${{ inputs.nightly-aliases }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/pack.ts
 
     - name: Upload tarball artifact
