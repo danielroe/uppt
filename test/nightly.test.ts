@@ -141,8 +141,8 @@ describe('rewriteManifest', () => {
     const pkg: Record<string, unknown> = {
       name: 'a',
       version: '1.0.0',
-      dependencies: { 'b': 'workspace:*', 'nuxi': '^3.0.0', 'c': 'npm:other@1', 'left-pad': '1' },
-      devDependencies: { b: 'workspace:^', nuxi: '^3.0.0' },
+      dependencies: { 'b': 'workspace:*', 'nuxi': 'npm:nuxi@^3.0.0', 'c': 'npm:other@1', 'left-pad': '1' },
+      devDependencies: { b: 'npm:b@^1.0.0', nuxi: '^3.0.0' },
       peerDependencies: { b: 'workspace:*' },
       optionalDependencies: { nuxi: '^3.0.0' },
     }

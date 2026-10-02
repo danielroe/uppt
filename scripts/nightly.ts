@@ -93,8 +93,7 @@ export function rewriteManifest (
   for (const field of ALL_DEPENDENCY_FIELDS) {
     const deps = pkg[field] as Record<string, string> | undefined
     if (!deps || typeof deps !== 'object') continue
-    for (const [dep, spec] of Object.entries(deps)) {
-      if (typeof spec === 'string' && spec.startsWith('npm:')) continue
+    for (const dep of Object.keys(deps)) {
       const target = opts.targets.get(dep)
       if (target) {
         deps[dep] = `npm:${target.name}@${target.version}`
