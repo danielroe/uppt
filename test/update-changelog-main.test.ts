@@ -619,17 +619,70 @@ describe('lockstep main', () => {
   })
 })
 
-describe('lockstep main with a conflicting release branch', () => {
+describe('lockstep main with a hand-edited version', () => {
+  function openReleasePR (ref: string, body = '> v1.3.0 is the next minor release.\n\n## 👉 Changelog\n\nstuff') {
+    api.openPRs = [{ number: 5, body, head: { ref, repo: { full_name: 'owner/repo' } }, base: { ref: 'main' }, updated_at: '2024-01-02T00:00:00Z' }]
+  }
+  const prUpdate = () => calls.findLast(c => c.method === 'PATCH' && c.path === '/repos/owner/repo/pulls/5')!.body as { title: string }
+
+  it('retitles the PR to the edited version, keeping its branch', async () => {
+    openReleasePR('release/v1.3.0')
+    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('2.0.0') })
+    await main()
+    expect(calls.filter(c => c.method !== 'GET' && !c.path.endsWith('/pulls/5'))).toEqual([])
+    expect(calls.find(c => (c.body as { state?: string } | undefined)?.state === 'closed')).toBeUndefined()
+    expect(prUpdate().title).toBe('v2.0.0')
+    expect(prBody()).toContain('> v2.0.0 is the next major release.')
+    expect(prBody()).toContain('compare/v1.2.3...v2.0.0')
+  })
+
+  it('follows a version edited down', async () => {
+    git.commits = [{ ...FEAT, subject: 'feat!: break a thing (#7)' }]
+    openReleasePR('release/v2.0.0', '> v2.0.0 is the next major release.\n\n## 👉 Changelog\n\nstuff')
+    releaseBranch('release/v2.0.0', { 'package.json': pkgJson('1.2.4') })
+    await main()
+    expect(prUpdate().title).toBe('v1.2.4')
+    expect(prBody()).toContain('> v1.2.4 is the next patch release.')
+  })
+
+  it('brings the other lockstep manifests up to the edited version', async () => {
+    process.env.PACKAGES = 'packages/*'
+    writePackage('packages/a', { name: 'a', version: '1.2.3' })
+    writePackage('packages/b', { name: 'b', version: '1.2.3' })
+    openReleasePR('release/v1.3.0')
+    releaseBranch('release/v1.3.0', {
+      'packages/a/package.json': pkgJson('1.5.0', 'a'),
+      'packages/b/package.json': pkgJson('1.3.0', 'b'),
+    })
+    await main()
+    expect(blobContents().map(c => JSON.parse(c))).toEqual([{ name: 'a', version: '1.5.0' }, { name: 'b', version: '1.5.0' }, { name: 'pkg', version: '1.5.0' }])
+    expect(prUpdate().title).toBe('v1.5.0')
+  })
+
   it.each(['{ not json', '{ "name": "pkg" }'])('rebuilds a branch whose manifest has no readable version: %s', async (manifest) => {
+    openReleasePR('release/v1.3.0')
     releaseBranch('release/v1.3.0', { 'package.json': manifest })
     await main()
     expect(JSON.parse(blobContents()[0]!)).toMatchObject({ version: '1.3.0' })
   })
 
-  it('rebuilds on base, keeping the version', async () => {
-    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.3.0') }, { behindBy: 2, baseChanged: ['package.json'] })
+  it('resets an edited version that is not above the current one', async () => {
+    openReleasePR('release/v1.3.0')
+    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.0.0') })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     await main()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('not above the current version'))
+    expect(calls.find(c => c.path.endsWith('/rename'))).toBeUndefined()
     expect(JSON.parse(blobContents()[0]!)).toMatchObject({ version: '1.3.0' })
+  })
+})
+
+describe('lockstep main with a conflicting release branch', () => {
+  it('rebuilds on base, keeping the pinned version', async () => {
+    api.openPRs = [{ number: 5, body: null, head: { ref: 'release/v1.3.0', repo: { full_name: 'owner/repo' } }, base: { ref: 'main' }, updated_at: '' }]
+    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('2.0.0') }, { behindBy: 2, baseChanged: ['package.json'] })
+    await main()
+    expect(JSON.parse(blobContents()[0]!)).toMatchObject({ version: '2.0.0' })
     expect(calls).toContainEqual(expect.objectContaining({ path: '/repos/owner/repo/git/commits', body: expect.objectContaining({ parents: ['base-sha'] }) }))
     expect(calls).toContainEqual(expect.objectContaining({ method: 'PATCH', path: '/repos/owner/repo/git/refs/heads/release/v1.3.0', body: { sha: 'commit-sha', force: true } }))
   })

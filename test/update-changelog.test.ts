@@ -1,9 +1,9 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { stripPlaceholderTimetable, TIMETABLE_PLACEHOLDER, buildBumpFileSet, dropRevertedCommits, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, truncateBody, dropAlreadyReleased, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
+import { resolvePinnedVersion, stripPlaceholderTimetable, TIMETABLE_PLACEHOLDER, buildBumpFileSet, dropRevertedCommits, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, truncateBody, dropAlreadyReleased, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
 import { resolveWorkspaces } from '../scripts/_workspaces.ts'
 
 let tmp: string
@@ -1003,5 +1003,37 @@ describe('isSupersededReleaseBranch', () => {
 
   it('supersedes a prerelease branch when building a prerelease', () => {
     expect(isSupersededReleaseBranch('release/v5.0.0-beta.0', { ...opts, releaseBranch: 'release/v5.0.0-beta.1', prerelease: true })).toBe(true)
+  })
+})
+
+describe('resolvePinnedVersion', () => {
+  const base = { headRef: 'release/v1.3.0', currentVersion: '1.2.3', prerelease: false }
+
+  it('returns a version that differs from the branch name', () => {
+    expect(resolvePinnedVersion({ ...base, branchVersions: ['2.0.0'] })).toBe('2.0.0')
+  })
+
+  it.each(['1.3.0-beta.2', '1.3.0-beta.1.0', '1.3.0-beta.x', '1.3.0-rc.0'])('accepts %s after 1.3.0-beta.1', (version) => {
+    expect(resolvePinnedVersion({ headRef: 'release/v1.3.0-beta.9', currentVersion: '1.3.0-beta.1', prerelease: true, branchVersions: [version] })).toBe(version)
+  })
+
+  it.each(['1.3.0-beta.1', '1.3.0-beta', '1.3.0-alpha.5', '1.3.0-1'])('rejects %s after 1.3.0-beta.1', (version) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(resolvePinnedVersion({ headRef: 'release/v1.3.0-beta.9', currentVersion: '1.3.0-beta.1', prerelease: true, branchVersions: [version] })).toBeNull()
+  })
+
+  it('returns null when nothing was edited', () => {
+    expect(resolvePinnedVersion({ ...base, branchVersions: ['1.3.0', undefined] })).toBeNull()
+  })
+
+  it.each([
+    [['2.0.0', '3.0.0'], false],
+    [['latest'], false],
+    [['1.2.3'], false],
+    [['2.0.0-beta.0'], false],
+    [['2.0.0'], true],
+  ])('rejects unusable versions %j (prerelease run: %s)', (branchVersions, prerelease) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(resolvePinnedVersion({ ...base, branchVersions, prerelease })).toBeNull()
   })
 })

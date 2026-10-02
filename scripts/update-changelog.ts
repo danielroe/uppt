@@ -34,7 +34,7 @@ import { resolve } from 'node:path'
 import { runMain } from './_cli.ts'
 import { makePkgFormatter } from './pkg-format.ts'
 
-import { buildScopeMap, parseScopesInput, resolveCurrentVersion, resolveWorkspaces, type Workspace } from './_workspaces.ts'
+import { buildScopeMap, isPrerelease, parseScopesInput, resolveCurrentVersion, resolveWorkspaces, type Workspace } from './_workspaces.ts'
 import { buildDependencyGraph, DEPENDENCY_FIELDS, propagateReleases, type BumpLevel } from './_dependency-graph.ts'
 
 export interface Commit {
@@ -1036,6 +1036,80 @@ export function stripPlaceholderTimetable (body: string): string {
     .replaceAll(`\n${TIMETABLE_PLACEHOLDER}`, '')
 }
 
+function bumpBetween (from: string, to: string): BumpLevel {
+  const core = (v: string) => v.split(/[-+]/)[0]!.split('.').map(Number)
+  const [a, b] = [core(from), core(to)]
+  if (a[0] !== b[0]) return 'major'
+  if (a[1] !== b[1]) return 'minor'
+  return 'patch'
+}
+
+/** Semver precedence of the prerelease suffixes of two versions sharing a core. */
+function comparePrerelease (a: string, b: string): number {
+  const ids = (v: string) => v.split('-').slice(1).join('-').split('.')
+  const [pa, pb] = [ids(a), ids(b)]
+  for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+    const [x, y] = [pa[i]!, pb[i]!]
+    if (x === y) continue
+    const [nx, ny] = [/^\d+$/.test(x), /^\d+$/.test(y)]
+    if (nx && ny) return Number(x) - Number(y)
+    if (nx !== ny) return nx ? -1 : 1
+    return x < y ? -1 : 1
+  }
+  return pa.length - pb.length
+}
+
+/**
+ * Hand-set version of a lockstep release PR: a branch manifest version that
+ * differs from the version in the branch name. `null` if none, or if unusable.
+ */
+export function resolvePinnedVersion (opts: {
+  headRef: string
+  branchVersions: Array<string | undefined>
+  currentVersion: string
+  prerelease: boolean
+}): string | null {
+  const nameVersion = opts.headRef.slice('release/v'.length)
+  const edited = [...new Set(opts.branchVersions.filter((v): v is string => typeof v === 'string' && v !== nameVersion))]
+  if (edited.length > 1) {
+    console.warn(`Ignoring hand-edited versions on ${opts.headRef}: manifests disagree (${edited.join(', ')}).`)
+    return null
+  }
+  const pinned = edited[0]
+  if (!pinned) return null
+  if (!/^\d+\.\d+\.\d+(?:-[0-9a-zA-Z.-]+)?$/.test(pinned)) {
+    console.warn(`Ignoring hand-edited version "${pinned}" on ${opts.headRef}: expected strict "X.Y.Z" semver.`)
+    return null
+  }
+  if ((compareVersions(pinned, opts.currentVersion) || comparePrerelease(pinned, opts.currentVersion)) <= 0) {
+    console.warn(`Ignoring hand-edited version "${pinned}" on ${opts.headRef}: not above the current version ${opts.currentVersion}.`)
+    return null
+  }
+  if (isPrerelease(pinned) !== opts.prerelease) {
+    console.warn(`Ignoring hand-edited version "${pinned}" on ${opts.headRef}: this run cuts a ${opts.prerelease ? 'prerelease' : 'stable release'}.`)
+    return null
+  }
+  return pinned
+}
+
+async function findTrackReleasePR (
+  repo: { owner: string, repo: string },
+  opts: { baseBranch: string, prerelease: boolean },
+): Promise<{ number: number, head: string } | undefined> {
+  const prs = await gh<Array<{ number: number, head: { ref: string, repo: { full_name: string } | null }, base: { ref: string }, updated_at: string }>>(
+    `/repos/${repo.owner}/${repo.repo}/pulls?state=open&per_page=100&base=${encodeURIComponent(opts.baseBranch)}&head=${repo.owner}:`,
+  )
+  const pr = prs
+    .filter(pr =>
+      pr.head.repo?.full_name === `${repo.owner}/${repo.repo}`
+      && pr.base.ref === opts.baseBranch
+      && pr.head.ref.startsWith('release/v')
+      && pr.head.ref.slice('release/v'.length).includes('-') === opts.prerelease,
+    )
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+  return pr && { number: pr.number, head: pr.head.ref }
+}
+
 function readVersion (source: string | null): string | undefined {
   try {
     const version = (JSON.parse(source!) as { version?: unknown }).version
@@ -1173,10 +1247,29 @@ export async function main () {
 
   const currentVersion = resolveCurrentVersion(process.cwd(), packagesInput)
 
-  const bump = determineBump(commits)
   const prerelease = process.env.PRERELEASE?.trim() || undefined
-  const newVersion = incVersion(currentVersion, bump, prerelease)
-  const releaseBranch = `release/v${newVersion}`
+  const computedVersion = incVersion(currentVersion, determineBump(commits), prerelease)
+
+  const bumpPaths = buildBumpFileSet({ monorepo, workspaces, rootPkg, rootPkgSource, currentVersion, newVersion: computedVersion })
+    .map(file => file.path)
+
+  let pinned: { version: string, pr: { number: number, head: string } } | null = null
+  const trackPR = await findTrackReleasePR(repo, { baseBranch, prerelease: Boolean(prerelease) })
+  if (trackPR) {
+    const branchVersions: Array<string | undefined> = []
+    for (const path of bumpPaths) branchVersions.push(readVersion(await getFileContent(repo, path, trackPR.head)))
+    const version = resolvePinnedVersion({
+      headRef: trackPR.head,
+      branchVersions,
+      currentVersion,
+      prerelease: Boolean(prerelease),
+    })
+    if (version) pinned = { version, pr: trackPR }
+  }
+
+  const newVersion = pinned?.version ?? computedVersion
+  const bump = pinned ? bumpBetween(currentVersion, newVersion) : determineBump(commits)
+  const releaseBranch = pinned?.pr.head ?? `release/v${newVersion}`
 
   const changelog = formatChangelog(commits, {
     owner: repo.owner,
@@ -1185,7 +1278,7 @@ export async function main () {
     toRef: `v${newVersion}`,
   })
 
-  console.log(`Current: ${currentVersion}  ->  ${newVersion} (${bump})`)
+  console.log(`Current: ${currentVersion}  ->  ${newVersion} (${bump}${pinned ? `, pinned on #${pinned.pr.number}` : ''})`)
   if (monorepo) {
     console.log(`Workspaces (${workspaces.length}): ${workspaces.map(ws => ws.name).join(', ')}`)
   }
@@ -1237,9 +1330,10 @@ export async function main () {
   const newContributors = contributors.filter(c => c.isFirstTime)
 
   const currentPR = await findOpenPR(repo, releaseBranch)
-  const preamble = extractPreamble(currentPR?.body)
-    || seedPreamble
-    || `> v${newVersion} is the next ${bump} release.\n>\n${TIMETABLE_PLACEHOLDER}`
+  const intro = `> v${newVersion} is the next ${bump} release.`
+  const preamble = (extractPreamble(currentPR?.body) || seedPreamble)
+    ?.replace(/^> v\S+ is the next (?:major|minor|patch) release\.$/m, intro)
+    || `${intro}\n>\n${TIMETABLE_PLACEHOLDER}`
 
   const body = [
     preamble,

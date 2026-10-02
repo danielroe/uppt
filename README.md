@@ -146,6 +146,8 @@ jobs:
 > [!TIP]
 > You can edit the release PR to add your own release notes. Anything above `## 👉 Changelog` is preserved when the changelog is updated.
 >
+> To release a different version than the one uppt picked, just change `version` in a `package.json` on the release branch. The next run will update the PR title and changelog to match (and, in a lockstep monorepo, the other manifests), and keep that version on later pushes. The branch keeps its original name.
+>
 > If base changes a manifest the release PR also bumps, the next run rebases the PR onto it, keeping its version. A release branch carrying other changes is left for you to update.
 
 ### Inputs
