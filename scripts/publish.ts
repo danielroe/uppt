@@ -30,6 +30,8 @@
 //                   independent mode: an array of
 //                   `{ name, version, dir }`. Names the tarballs to
 //                   stage when TARBALL_FILES is absent.
+//   NIGHTLY         `true` to `npm publish` nightlies (dist-tag
+//                   `latest` by default) instead of staging
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
@@ -111,6 +113,10 @@ export function main () {
   if (!existsSync(dir)) throw new Error(`TARBALL_DIR does not exist: ${dir}`)
 
   const releases = releasesFromEnv(process.env.RELEASES)
+  const nightly = process.env.NIGHTLY === 'true'
+  if (nightly && releases) throw new Error('RELEASES cannot be combined with NIGHTLY')
+  const command = nightly ? ['publish'] : ['stage', 'publish']
+  const defaultTag = nightly ? (tagOverride ?? 'latest') : tagOverride
 
   const filesEnv = process.env.TARBALL_FILES?.trim()
   let tarballs: string[]
@@ -135,7 +141,7 @@ export function main () {
     if (!existsSync(tarballPath)) {
       throw new Error(`Tarball '${tarball}' is not present in ${dir}`)
     }
-    run('npm', ['stage', 'publish', tarballPath, '--provenance', '--ignore-scripts', `--access=${access}`, `--tag=${tagFor(tarball, tagOverride)}`])
+    run('npm', [...command, tarballPath, '--provenance', '--ignore-scripts', `--access=${access}`, `--tag=${tagFor(tarball, defaultTag)}`])
   }
 }
 

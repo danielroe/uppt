@@ -182,6 +182,9 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | `install` | `true` | Set to `false` to handle `actions/setup-node` and dependency installation yourself (pinned package manager, cached `node_modules`, hardened install policy). The caller must then put `node`, `npm`, and any package manager on PATH first. |
 | `packages` | _(unset)_ | Must match the value passed to `uppt/pr`. |
 | `releases` | _(unset)_ | Independent-mode publish payload, from the workflow's `releases` dispatch input. Never set by hand. |
+| `nightly` | `false` | Pack nightly builds of the current branch. See [Nightly releases](#nightly-releases). |
+| `nightly-suffix` | `-nightly` | Suffix appended to package names for nightly builds. |
+| `nightly-aliases` | _(unset)_ | External dependencies to point at their own nightlies. |
 
 | Output | Description |
 | --- | --- |
@@ -197,6 +200,7 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | `npm-tag` | _(derived)_ | npm dist-tag override for every tarball. By default stable versions publish to `latest`, prereleases to their identifier (`5.0.0-beta.0` → `beta`), bare-numeric prereleases (`5.0.0-0`) to `next`, and maintenance releases to `<major>x` (see [Maintenance releases](#maintenance-releases)). |
 | `files` | _(scan artifact)_ | JSON array of tarball filenames, as emitted by `uppt/pack`. When omitted, every `*.tgz` in the artifact is published. |
 | `releases` | _(unset)_ | Independent-mode publish payload. Never set by hand. |
+| `nightly` | `false` | Publish nightly builds with `npm publish` instead of staging them. See [Nightly releases](#nightly-releases). |
 </details>
 
 ## Lifecycle scripts
@@ -234,6 +238,76 @@ If your line uses a different dist-tag (`legacy`, `v3-latest`), or the release s
 ```
 
 It overrides the derivation, applies to every tarball in the run, and any value other than `latest` also keeps the GitHub release out of the "Latest" slot.
+
+## Nightly releases
+
+uppt can also publish a nightly build of every push to a branch, under a separate package name (`@nuxt/test-utils` → `@nuxt/test-utils-nightly`). Nightlies skip the release PR and staging: they publish straight to npm via OIDC, so add a trusted publisher for each nightly package pointing at the workflow below, with 'Environment name' set to `nightly` (no `npm stage publish` permission needed).
+
+Create a matching `nightly` [GitHub environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments) and limit its deployment branches to the branch(es) you publish nightlies from (e.g. `main`). Without approvals or staging, this is what stops a workflow run on any other ref from publishing.
+
+<details>
+<summary>Nightly workflow</summary>
+
+```yaml
+name: nightly
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  pack:
+    if: '!github.event.repository.fork'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      files: ${{ steps.pack.outputs.files }}
+    steps:
+      - id: pack
+        uses: danielroe/uppt/pack@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+        with:
+          nightly: true
+
+  publish:
+    needs: pack
+    runs-on: ubuntu-latest
+    concurrency:
+      group: nightly-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+    environment: nightly
+    steps:
+      - uses: danielroe/uppt/publish@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+        with:
+          nightly: true
+          files: ${{ needs.pack.outputs.files }}
+```
+
+</details>
+
+`uppt/pack` rewrites each package before packing it:
+
+- **Name**: `<name>-nightly`. Set `nightly-suffix` to use something else (`-edge`).
+- **Version**: `<version>-<YYMMDDHHmm>-<sha>`, e.g. `3.20.1-2605140905-a1b2c3d`. `<version>` is the `X.Y.Z` part of the version in `package.json`, the timestamp is the HEAD commit's date in UTC, and `<sha>` is its 7-character short hash. Newer commits always sort higher.
+- **Workspace dependencies**: in a monorepo (pass the same `packages` input), dependencies between listed packages become `npm:<name>-nightly@<version>`, so each nightly installs the other nightlies from the same commit.
+- **External nightlies**: `nightly-aliases` points dependencies on packages from other repos at their own nightlies.
+- **Bins**: every command gains a `-nightly` copy, plus one named after the package, so `npx <name>-nightly` works.
+
+```yaml
+- uses: danielroe/uppt/pack@65a86313a63b10a6793de6c4ff8614b18e127a71 # v0.6.10
+  with:
+    nightly: true
+    packages: packages/*
+    nightly-aliases: |
+      nuxi
+      @nuxt/cli: @nuxt/cli-nightly@5x
+```
+
+A bare name aliases to `npm:<name>-nightly@latest`. Nightlies publish to the `latest` dist-tag of the nightly package; set `npm-tag` on `uppt/publish` to publish a branch to another tag (`5x`).
 
 ## Monorepo support
 

@@ -24,6 +24,9 @@
 //                    workspaces are packed, in that order, and the ref
 //                    must be a `release-YYYY-MM-DD` coordination
 //                    tag instead of `vX.Y.Z`.
+//   NIGHTLY          `true` to pack nightly builds of a `refs/heads/*` ref
+//   NIGHTLY_SUFFIX   package name suffix
+//   NIGHTLY_ALIASES  external dependencies to alias to their nightlies
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
@@ -33,6 +36,7 @@ import { resolve } from 'node:path'
 import { runMain } from './_cli.ts'
 import { parseFilenames } from './_pack-json.ts'
 import { resolveWorkspaces } from './_workspaces.ts'
+import { applyNightly } from './nightly.ts'
 import { COORDINATION_TAG_RE, releasesFromEnv, type ReleaseEntry } from './_independent.ts'
 
 function runCapture (cmd: string, args: string[], cwd: string): string {
@@ -67,8 +71,15 @@ export function main () {
   const ref = process.env.GITHUB_REF ?? ''
   const releases = releasesFromEnv(process.env.RELEASES)
 
+  const nightly = process.env.NIGHTLY === 'true'
   const tag = ref.startsWith('refs/tags/') ? ref.slice('refs/tags/'.length) : ''
-  if (releases) {
+  if (nightly) {
+    if (releases) throw new Error('RELEASES cannot be combined with NIGHTLY')
+    if (!ref.startsWith('refs/heads/')) {
+      throw new Error(`NIGHTLY is set, so GITHUB_REF must be a 'refs/heads/*' branch, got '${ref || '<unset>'}'`)
+    }
+  }
+  else if (releases) {
     if (!COORDINATION_TAG_RE.test(tag)) {
       throw new Error(`RELEASES is set, so GITHUB_REF must be a 'refs/tags/release-YYYY-MM-DD' coordination tag, got '${ref || '<unset>'}'`)
     }
@@ -83,6 +94,9 @@ export function main () {
 
   const hasPnpmLock = existsSync(resolve(process.cwd(), 'pnpm-lock.yaml'))
   const packagesInput = process.env.PACKAGES?.trim() ?? ''
+  if (nightly) {
+    applyNightly(process.cwd(), { packagesInput, suffix: process.env.NIGHTLY_SUFFIX?.trim(), aliases: process.env.NIGHTLY_ALIASES })
+  }
   const targets = releases
     ? releaseTargets(process.cwd(), releases)
     : packagesInput.length
@@ -109,7 +123,7 @@ export function main () {
       throw new Error(`Pack tool reported '${filename}' but it is not present in ${outDir}`)
     }
     const size = statSync(tarballPath).size
-    console.log(`Packed ${filename} (${size} bytes) for ${tag}`)
+    console.log(`Packed ${filename} (${size} bytes) for ${tag || ref}`)
   }
 
   const githubOutput = process.env.GITHUB_OUTPUT
