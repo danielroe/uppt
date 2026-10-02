@@ -1,5 +1,4 @@
-// Base branch and prerelease identifier for a `uppt/pr` run: the action
-// inputs, or for a push to `release/v*`, those of that branch's open PR.
+// Resolves the base branch and prerelease identifier for a `uppt/pr` run.
 //
 // Env:
 //   GITHUB_REF         ref that triggered the run

@@ -1018,7 +1018,7 @@ describe('resolvePinnedVersion', () => {
   })
 
   it.each(['1.3.0-beta.1', '1.3.0-beta', '1.3.0-alpha.5', '1.3.0-1'])('rejects %s after 1.3.0-beta.1', (version) => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'log').mockImplementation(() => {})
     expect(resolvePinnedVersion({ headRef: 'release/v1.3.0-beta.9', currentVersion: '1.3.0-beta.1', prerelease: true, branchVersions: [version] })).toBeNull()
   })
 
@@ -1038,7 +1038,7 @@ describe('resolvePinnedVersion', () => {
     [['2.0.0-beta.0'], false],
     [['2.0.0'], true],
   ])('rejects unusable versions %j (prerelease run: %s)', (branchVersions, prerelease) => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'log').mockImplementation(() => {})
     expect(resolvePinnedVersion({ ...base, branchVersions, prerelease })).toBeNull()
   })
 })

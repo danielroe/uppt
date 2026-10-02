@@ -1,6 +1,4 @@
-// Rewrite package.json(s) into nightly builds before `uppt/pack` packs
-// them: `<name><suffix>@<version>-<YYMMDDHHmm>-<sha7>`, with dependencies
-// between listed packages pinned to the nightlies from the same commit.
+// Rewrites package.json(s) into `<name><suffix>@<version>-<YYMMDDHHmm>-<sha7>` nightlies.
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'

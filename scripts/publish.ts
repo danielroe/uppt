@@ -47,7 +47,7 @@ function run (cmd: string, args: string[]) {
   execFileSync(cmd, args, { stdio: 'inherit' })
 }
 
-/** `run`, but an E403 (such as a nightly of the same commit already on npm) only warns. */
+/** `run`, but an E403 only warns. */
 function runTolerating403 (cmd: string, args: string[]) {
   console.log('$', cmd, ...args)
   const result = spawnSync(cmd, args, { stdio: ['inherit', 'inherit', 'pipe'], encoding: 'utf8' })

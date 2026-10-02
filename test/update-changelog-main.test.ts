@@ -35,6 +35,7 @@ interface FakePR {
   body: string | null
   head: { ref: string, repo: { full_name: string } | null }
   base: { ref: string }
+  created_at?: string
   updated_at: string
 }
 
@@ -86,6 +87,7 @@ function stubGit () {
     if (sub === 'remote') return git.remote
     if (sub === 'rev-parse') return args.includes('--abbrev-ref') ? git.branch : HEAD_SHA
     if (sub === 'rev-list') return git.revList.join('\n')
+    if (sub === 'log' && args.includes('--format=%ct')) return String(Date.parse('2024-01-01T00:00:00Z') / 1000)
     if (sub === 'log' && args[1] === '-1') return '2024-01-01T00:00:00Z'
     if (sub === 'log' && args.includes('--pretty=format:%s')) {
       if (git.failDivergedSubjects) throw new Error('bad revision')
@@ -126,7 +128,9 @@ function route (method: string, path: string, body: unknown): { status: number, 
       const branch = head.slice('owner:'.length)
       return { status: 200, body: api.openPRs.filter(pr => pr.head.ref === branch) }
     }
-    return { status: 200, body: api.openPRs }
+    const page = Number(params.get('page') ?? 1)
+    const perPage = Number(params.get('per_page') ?? 30)
+    return { status: 200, body: api.openPRs.slice((page - 1) * perPage, page * perPage) }
   }
   if (method === 'POST' && rest === '/pulls') {
     return { status: 201, body: { number: 42, html_url: 'https://github.com/owner/repo/pull/42' } }
@@ -678,9 +682,9 @@ describe('lockstep main with a hand-edited version', () => {
   it('resets an edited version that is not above the current one', async () => {
     openReleasePR('release/v1.3.0')
     releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.0.0') })
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     await main()
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('not above the current version'))
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('::warning::Ignoring hand-edited version "1.0.0" on release/v1.3.0: not above the current version'))
     expect(calls.find(c => c.path.endsWith('/rename'))).toBeUndefined()
     expect(JSON.parse(blobContents()[0]!)).toMatchObject({ version: '1.3.0' })
   })
@@ -696,7 +700,8 @@ describe('lockstep main with a conflicting release branch', () => {
     expect(calls).toContainEqual(expect.objectContaining({ method: 'PATCH', path: '/repos/owner/repo/git/refs/heads/release/v1.3.0', body: { sha: 'commit-sha', force: true } }))
   })
 
-  it('leaves a branch with other changes, and its PR, alone', async () => {
+  it('keeps a branch with other changes but still updates its PR when only base has moved', async () => {
+    api.openPRs = [{ number: 5, body: null, head: { ref: 'release/v1.3.0', repo: { full_name: 'owner/repo' } }, base: { ref: 'main' }, updated_at: '' }]
     releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.3.0') }, {
       behindBy: 1,
       baseChanged: ['package.json'],
@@ -705,8 +710,42 @@ describe('lockstep main with a conflicting release branch', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     await main()
     expect(log).toHaveBeenCalledWith(expect.stringContaining('::warning::Cannot rebuild release/v1.3.0'))
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining('::warning::Leaving the release PR'))
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([
+      expect.objectContaining({ method: 'PATCH', path: '/repos/owner/repo/pulls/5' }),
+    ])
+  })
+
+  it('leaves a branch with other changes, and its PR, alone when it does not carry the plan', async () => {
+    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.3.0', 'stale') }, {
+      extra: [{ filename: 'NOTES.md' }],
+    })
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    await main()
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('::warning::Cannot rebuild release/v1.3.0'))
     expect(log).toHaveBeenCalledWith(expect.stringContaining('::warning::Leaving the release PR'))
     expect(calls.filter(c => c.method !== 'GET')).toEqual([])
+  })
+
+  it('finds the pinned release PR beyond the first page of open PRs', async () => {
+    api.openPRs = [
+      ...Array.from({ length: 100 }, (_, i) => ({ number: 100 + i, body: null, head: { ref: `feat/${i}`, repo: { full_name: 'owner/repo' } }, base: { ref: 'main' }, created_at: '2024-01-03T00:00:00Z', updated_at: '2024-01-03T00:00:00Z' })),
+      { number: 5, body: null, head: { ref: 'release/v1.2.4', repo: { full_name: 'owner/repo' } }, base: { ref: 'main' }, created_at: '2024-01-02T00:00:00Z', updated_at: '2024-01-02T00:00:00Z' },
+    ]
+    releaseBranch('release/v1.2.4', { 'package.json': pkgJson('1.5.0') })
+    await main()
+    expect(calls).toContainEqual(expect.objectContaining({ method: 'PATCH', path: '/repos/owner/repo/pulls/5', body: expect.objectContaining({ title: 'v1.5.0' }) }))
+    expect(calls.filter(c => c.method === 'DELETE')).toEqual([])
+  })
+
+  it('stops listing open PRs once they predate the last stable release', async () => {
+    git.tags = ['v2.0.0-beta.0', 'v1.2.3']
+    api.openPRs = Array.from({ length: 200 }, (_, i) => ({ number: 100 + i, body: null, head: { ref: `feat/${i}`, repo: { full_name: 'owner/repo' } }, base: { ref: 'main' }, created_at: i < 99 ? '2024-01-03T00:00:00Z' : '2023-12-01T00:00:00Z', updated_at: '' }))
+    await main()
+    const pages = calls.filter(c => c.method === 'GET' && /\/pulls\?/.test(c.path) && !c.path.includes('head=')).map(c => new URLSearchParams(c.path.split('?')[1]).get('page'))
+    expect(pages.length).toBeGreaterThan(0)
+    expect(pages.every(page => page === '1')).toBe(true)
+    expect(execFileSync).toHaveBeenCalledWith('git', ['log', '-1', '--format=%ct', 'refs/tags/v1.2.3'], expect.anything())
   })
 })
 

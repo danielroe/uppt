@@ -608,6 +608,28 @@ async function getContributors (
   return out
 }
 
+interface OpenPR {
+  number: number
+  body: string | null
+  head: { ref: string, repo: { full_name: string } | null }
+  base: { ref: string }
+  created_at: string
+  updated_at: string
+}
+
+/** Open PRs against `baseBranch`, newest first, stopping at a page that reaches `since` (epoch ms). */
+async function listOpenPRs (repo: { owner: string, repo: string }, baseBranch: string, since?: number | null): Promise<OpenPR[]> {
+  const prs: OpenPR[] = []
+  for (let page = 1; ; page++) {
+    const batch = await gh<OpenPR[]>(
+      `/repos/${repo.owner}/${repo.repo}/pulls?state=open&sort=created&direction=desc&per_page=100&page=${page}&base=${encodeURIComponent(baseBranch)}`,
+    )
+    prs.push(...batch)
+    if (batch.length < 100) return prs
+    if (since != null && batch.some(pr => Date.parse(pr.created_at) < since)) return prs
+  }
+}
+
 /**
  * Close open release PRs on `baseBranch` that `isStale` matches, deleting
  * their branches. Returns the preamble of the most recently updated stale
@@ -617,11 +639,10 @@ async function closeSupersededPRs (
   repo: { owner: string, repo: string },
   baseBranch: string,
   isStale: (headRef: string) => boolean,
+  since?: number | null,
 ): Promise<string | null> {
   let seedPreamble: string | null = null
-  const openReleasePRs = await gh<Array<{ number: number, body: string | null, head: { ref: string, repo: { full_name: string } | null }, base: { ref: string }, updated_at: string }>>(
-    `/repos/${repo.owner}/${repo.repo}/pulls?state=open&per_page=100&base=${encodeURIComponent(baseBranch)}&head=${repo.owner}:`,
-  )
+  const openReleasePRs = await listOpenPRs(repo, baseBranch, since)
   const sameRepo = `${repo.owner}/${repo.repo}`
   const stale = openReleasePRs
     .filter(pr =>
@@ -814,7 +835,8 @@ export function releaseBranchDrift (opts: {
  * Make `opts.branch` carry `opts.files` as its diff against `opts.base`,
  * rebuilding it as a single commit on the base tip only when that isn't
  * already true (see `releaseBranchDrift`). With `keepOtherChanges`, a branch
- * that also changes other files is never rebuilt. A rebuild always
+ * that also changes other files is never rebuilt. Resolves to whether the
+ * branch carries the plan. A rebuild always
  * force-updates the ref straight to the new commit rather than resetting to
  * base first: a branch that momentarily equals its base makes GitHub close
  * the open PR as having nothing to merge.
@@ -830,9 +852,7 @@ async function syncReleaseBranch (
     isCurrent?: (branch: string | null, desired: string) => boolean
   },
 ): Promise<boolean> {
-  /* v8 ignore next 3 -- unreachable: every caller derives `files` from a
-     non-empty release plan. Kept because the divergent path below
-     force-updates the release branch, so an empty file set would discard it. */
+  /* v8 ignore next 3 -- unreachable: callers never pass an empty plan. */
   if (!opts.files.length) {
     throw new Error('syncReleaseBranch: refusing to commit with no files')
   }
@@ -885,7 +905,14 @@ async function syncReleaseBranch (
   const others = opts.keepOtherChanges ? [...divergence?.changed ?? []].filter(path => !desired.has(path)) : []
   if (others.length) {
     console.log(`::warning::Cannot rebuild ${opts.branch} (${drift}) without discarding its changes to ${others.join(', ')}.`)
-    return false
+    return !releaseBranchDrift({
+      divergence,
+      desired,
+      branchContents,
+      baseTouched: [],
+      keepOtherChanges: true,
+      isCurrent: opts.isCurrent,
+    })
   }
   if (!process.env.GITHUB_TOKEN) {
     throw new Error('GITHUB_TOKEN is required to create the release branch')
@@ -1059,37 +1086,34 @@ function comparePrerelease (a: string, b: string): number {
   return pa.length - pb.length
 }
 
-/**
- * Hand-set version of a lockstep release PR: a branch manifest version that
- * differs from the version in the branch name. `null` if none, or if unusable.
- */
+/** Hand-set version on a lockstep release branch, or `null` if none is usable. */
 export function resolvePinnedVersion (opts: {
   headRef: string
   branchVersions: Array<string | undefined>
   currentVersion: string
   prerelease: boolean
-  /** Prerelease identifier of this run; a branch named for another identifier is not pinned. */
+  /** Prerelease identifier of this run. */
   identifier?: string
 }): string | null {
   const nameVersion = opts.headRef.slice('release/v'.length)
   if (opts.identifier !== undefined && prereleaseIdentifier(nameVersion) !== opts.identifier) return null
   const edited = [...new Set(opts.branchVersions.filter((v): v is string => typeof v === 'string' && v !== nameVersion))]
   if (edited.length > 1) {
-    console.warn(`Ignoring hand-edited versions on ${opts.headRef}: manifests disagree (${edited.join(', ')}).`)
+    console.log(`::warning::Ignoring hand-edited versions on ${opts.headRef}: manifests disagree (${edited.join(', ')}).`)
     return null
   }
   const pinned = edited[0]
   if (!pinned) return null
   if (!/^\d+\.\d+\.\d+(?:-[0-9a-zA-Z.-]+)?$/.test(pinned)) {
-    console.warn(`Ignoring hand-edited version "${pinned}" on ${opts.headRef}: expected strict "X.Y.Z" semver.`)
+    console.log(`::warning::Ignoring hand-edited version "${pinned}" on ${opts.headRef}: expected strict "X.Y.Z" semver.`)
     return null
   }
   if ((compareVersions(pinned, opts.currentVersion) || comparePrerelease(pinned, opts.currentVersion)) <= 0) {
-    console.warn(`Ignoring hand-edited version "${pinned}" on ${opts.headRef}: not above the current version ${opts.currentVersion}.`)
+    console.log(`::warning::Ignoring hand-edited version "${pinned}" on ${opts.headRef}: not above the current version ${opts.currentVersion}.`)
     return null
   }
   if (isPrerelease(pinned) !== opts.prerelease) {
-    console.warn(`Ignoring hand-edited version "${pinned}" on ${opts.headRef}: this run cuts a ${opts.prerelease ? 'prerelease' : 'stable release'}.`)
+    console.log(`::warning::Ignoring hand-edited version "${pinned}" on ${opts.headRef}: this run cuts a ${opts.prerelease ? 'prerelease' : 'stable release'}.`)
     return null
   }
   return pinned
@@ -1097,11 +1121,9 @@ export function resolvePinnedVersion (opts: {
 
 async function findTrackReleasePR (
   repo: { owner: string, repo: string },
-  opts: { baseBranch: string, prerelease: boolean },
+  opts: { baseBranch: string, prerelease: boolean, since: number | null },
 ): Promise<{ number: number, head: string } | undefined> {
-  const prs = await gh<Array<{ number: number, head: { ref: string, repo: { full_name: string } | null }, base: { ref: string }, updated_at: string }>>(
-    `/repos/${repo.owner}/${repo.repo}/pulls?state=open&per_page=100&base=${encodeURIComponent(opts.baseBranch)}&head=${repo.owner}:`,
-  )
+  const prs = await listOpenPRs(repo, opts.baseBranch, opts.since)
   const pr = prs
     .filter(pr =>
       pr.head.repo?.full_name === `${repo.owner}/${repo.repo}`
@@ -1265,7 +1287,10 @@ export async function main () {
     .map(file => file.path)
 
   let pinned: { version: string, pr: { number: number, head: string } } | null = null
-  const trackPR = await findTrackReleasePR(repo, { baseBranch, prerelease: Boolean(prerelease) })
+  const stableTag = getAllTags().find(t => /^v?\d+\.\d+\.\d+$/.test(t))
+  const releasedAt = stableTag ? Number(git('log', '-1', '--format=%ct', `refs/tags/${stableTag}`)) * 1000 : null
+
+  const trackPR = await findTrackReleasePR(repo, { baseBranch, prerelease: Boolean(prerelease), since: releasedAt })
   if (trackPR) {
     const branchVersions: Array<string | undefined> = []
     for (const path of bumpPaths) branchVersions.push(readVersion(await getFileContent(repo, path, trackPR.head)))
@@ -1313,7 +1338,7 @@ export async function main () {
   let seedPreamble: string | null = null
   if (!dryRun && process.env.GITHUB_TOKEN) {
     seedPreamble = await closeSupersededPRs(repo, baseBranch, headRef =>
-      isSupersededReleaseBranch(headRef, { releaseBranch, baseBranch, prerelease: Boolean(prerelease) }))
+      isSupersededReleaseBranch(headRef, { releaseBranch, baseBranch, prerelease: Boolean(prerelease) }), releasedAt)
   }
 
   if (!dryRun) {
