@@ -245,6 +245,9 @@ uppt can also publish a nightly build of every push to a branch, under a separat
 
 Create a matching `nightly` [GitHub environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments) and limit its deployment branches to the branch(es) you publish nightlies from (e.g. `main`). Without approvals or staging, this is what stops a workflow run on any other ref from publishing.
 
+<details>
+<summary>Nightly workflow</summary>
+
 ```yaml
 name: nightly
 
@@ -282,6 +285,8 @@ jobs:
           nightly: true
           files: ${{ needs.pack.outputs.files }}
 ```
+
+</details>
 
 `uppt/pack` rewrites each package before packing it:
 
