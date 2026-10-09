@@ -191,27 +191,28 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | `prerelease` | _(unset)_ | One-shot prerelease identifier (`beta`, `rc`, or a bare number). See [Prereleases](#prereleases). |
 | `pr-preamble` | _(unset)_ | Custom Markdown to append to the initial PR preamble (e.g. preview links). If a JSON string is provided, it maps target branch names to specific preamble strings. |
 
-
-> **💡 Tip: Custom PR Preambles**: You can use the `pr-preamble` input on `uppt/pr` to inject custom Markdown into the release PR body. This is especially useful for linking to CI artifacts, preview tools like `pkg-pr-new`, or nightly builds.
+> **💡 Tip: Custom PR Preambles:** You can use the `pr-preamble` input on `uppt/pr` to inject custom Markdown into the release PR body. This is especially useful for linking to CI artifacts, preview tools like `pkg-pr-new`, or nightly builds.
 >
-> For a single plain text preamble applied to all branches:
+> For a single plain text preamble applied to all branches, using `pkg-pr-new` workflow as an example (replace `main` with your corresponding branch name), you can do:
 > ```yaml
-> - uses: danielroe/uppt/pr@v0.6.11
+> - uses: danielroe/uppt/pr@<sha-of-latest-release>
 >   with:
->     pr-preamble: '📦 [Preview packages with pkg-pr-new](https://pkg.pr.new/...)'
+>     pr-preamble: "## ⚡ Test the latest changes that will be included in this release\n\n[📦 View `pkg-pr-new` packages from the latest commit on main](https://github.com/<username-organization>/<repository>/actions/workflows/pkg-pr-new.yml?query=branch%3Amain)"
 > ```
 >
-> To target specific base branches, pass a valid JSON string. This is helpful when maintaining multiple release lines (the script falls back to `default` if the branch isn't listed):
+> To target specific base branches, pass a valid JSON string. This is helpful when maintaining multiple release lines (the script falls back to `default` if the branch isn't listed), following with the `pkg-pr-new` workflow example:
 > ```yaml
-> - uses: danielroe/uppt/pr@v0.6.11
+> - uses: danielroe/uppt/pr@<sha-of-latest-release>
 >   with:
 >     pr-preamble: |
 >       {
->         "main": "📦 [Preview main branch via pkg-pr-new](https://pkg.pr.new/...)",
->         "3.x": "📦 [Preview 3.x branch via pkg-pr-new](https://pkg.pr.new/...)",
->         "default": "📦 Preview builds are being generated..."
+>         "main": "## ⚡ Test the latest changes that will be included in this release\n\n[📦 View `pkg-pr-new` packages from the latest commit on main](https://github.com/<username-organization>/<repository>/actions/workflows/pkg-pr-new.yml?query=branch%3Amain)",
+>         "3.x": "## ⚡ Test the latest changes that will be included in this release\n\n[📦 View `pkg-pr-new` packages from the latest commit on 3.x](https://github.com/<username-organization>/<repository>/actions/workflows/pkg-pr-new.yml?query=branch%3A3.x)",
+>         "default": "## 🚀 Release Notice\n\nPreview builds are being generated..."
 >       }
 > ```
+>
+> *(Note: To ensure the `pkg-pr-new` preview links always have valid artifacts, remember to configure your `pkg-pr-new.yml` workflow to run on `push` events to your base branches like `main`.)*
 </details>
 
 <details>
