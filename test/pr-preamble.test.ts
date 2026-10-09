@@ -70,4 +70,20 @@ describe('resolvePrPreamble', () => {
 		process.env.PR_PREAMBLE = '"just a plain string"'
 		expect(resolvePrPreamble('main')).toBe('"just a plain string"')
 	})
+
+	it('ignores inherited prototype properties (e.g. constructor)', () => {
+		process.env.PR_PREAMBLE = JSON.stringify({ default: '📦 Fallback' })
+		// 'constructor' exists on Object.prototype, but hasOwnProperty should reject it
+		expect(resolvePrPreamble('constructor')).toBe('📦 Fallback')
+	})
+
+	it('ignores mapped values that are not strings', () => {
+		process.env.PR_PREAMBLE = JSON.stringify({ main: 123, default: '📦 Fallback' })
+		expect(resolvePrPreamble('main')).toBe('📦 Fallback')
+	})
+
+	it('ignores mapped values that are empty strings or just whitespace', () => {
+		process.env.PR_PREAMBLE = JSON.stringify({ main: '   ', default: '📦 Fallback' })
+		expect(resolvePrPreamble('main')).toBe('📦 Fallback')
+	})
 })

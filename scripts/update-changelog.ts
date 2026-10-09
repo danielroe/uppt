@@ -1264,7 +1264,14 @@ export function resolvePrPreamble(baseBranch: string): string | undefined {
   try {
     const parsed = JSON.parse(envPreamble)
     if (typeof parsed === 'object' && parsed !== null) {
-      return parsed[baseBranch] || parsed['default'] || undefined
+      const pick = (key: string): string | undefined => {
+        if (!Object.prototype.hasOwnProperty.call(parsed, key)) {
+          return undefined
+        }
+        const value = (parsed as Record<string, unknown>)[key]
+        return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+      }
+      return pick(baseBranch) ?? pick('default')
     }
   } catch {
     return envPreamble
