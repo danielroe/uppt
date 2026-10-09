@@ -43,6 +43,9 @@ inputs:
     description: 'Whether to run when the repository is a fork. Defaults to `false` so a fork of a repo using uppt does not open release PRs of its own.'
     required: false
     default: 'false'
+  pr-preamble:
+    description: 'Custom Markdown to append to the initial PR preamble (e.g. preview links). If a JSON string is provided, it will map target branch names to specific preamble strings.'
+    required: false
 
 runs:
   using: composite
@@ -102,4 +105,5 @@ runs:
         PRERELEASE: ${{ steps.target.outputs.prerelease }}
         MODE: ${{ inputs.mode }}
         SCOPES: ${{ inputs.scopes }}
+        PR_PREAMBLE: ${{ inputs.pr-preamble }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/update-changelog.ts
