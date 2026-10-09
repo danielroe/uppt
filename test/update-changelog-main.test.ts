@@ -20,6 +20,7 @@ const ENV_KEYS = [
   'MODE',
   'SCOPES',
   'TITLE',
+  'PR_PREAMBLE',
 ] as const
 
 interface FakeCommit {
@@ -658,6 +659,12 @@ describe('lockstep main', () => {
     const createRef = calls.find(c => c.method === 'POST' && c.path.endsWith('/git/refs'))!
     expect(createRef.body).toMatchObject({ ref: 'refs/heads/release/v1.3.0', sha: 'commit-sha' })
   })
+
+  it('injects the custom PR preamble from the environment', async () => {
+    process.env.PR_PREAMBLE = '⚡ Custom lockstep preamble'
+    await main()
+    expect(prBody()).toContain('⚡ Custom lockstep preamble')
+  })
 })
 
 describe('lockstep main with a hand-edited version', () => {
@@ -1044,5 +1051,14 @@ describe('independent main', () => {
     process.env.PRERELEASE = 'rc'
     await main()
     expect(blobContents().map(c => JSON.parse(c).version)).toEqual(['1.1.0-rc.0', '2.0.1-rc.0'])
+  })
+
+  it('injects the custom PR preamble from the environment', async () => {
+    process.env.PR_PREAMBLE = JSON.stringify({
+      'main': '⚡ Custom independent preamble for main',
+      'default': 'Fallback preamble'
+    })
+    await main()
+    expect(prBody()).toContain('⚡ Custom independent preamble for main')
   })
 })
