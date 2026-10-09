@@ -168,6 +168,30 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | `packages` | _(unset)_ | Newline-separated list of publishable workspace directories (paths or globs, e.g. `packages/*`). See [Monorepo support](#monorepo-support). |
 | `allow-forks` | `false` | By default the action skips on forks so they don't open release PRs of their own. |
 | `prerelease` | _(unset)_ | One-shot prerelease identifier (`beta`, `rc`, or a bare number). See [Prereleases](#prereleases). |
+| `pr-preamble` | _(unset)_ | Custom Markdown to append to the initial PR preamble (e.g. preview links). If a JSON string is provided, it maps target branch names to specific preamble strings. |
+
+
+> [!TIP]
+> **Custom PR Preambles:** You can use the `pr-preamble` input on `uppt/pr` to inject custom Markdown into the release PR body. This is especially useful for linking to CI artifacts, preview tools like `pkg-pr-new`, or nightly builds.
+>
+> For a single plain text preamble applied to all branches:
+> ```yaml
+> - uses: danielroe/uppt/pr@v0.6.11
+>   with:
+>     pr-preamble: '📦 [Preview packages with pkg-pr-new](https://pkg.pr.new/...)'
+> ```
+>
+> To target specific base branches, pass a valid JSON string. This is helpful when maintaining multiple release lines (the script falls back to `default` if the branch isn't listed):
+> ```yaml
+> - uses: danielroe/uppt/pr@v0.6.11
+>   with:
+>     pr-preamble: |
+>       {
+>         "main": "📦 [Preview main branch via pkg-pr-new](https://pkg.pr.new/...)",
+>         "3.x": "📦 [Preview 3.x branch via pkg-pr-new](https://pkg.pr.new/...)",
+>         "default": "📦 Preview builds are being generated..."
+>       }
+> ```
 </details>
 
 <details>
