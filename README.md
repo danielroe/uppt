@@ -193,7 +193,7 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 
 
 > [!TIP]
-> **Custom PR Preambles:** You can use the `pr-preamble` input on `uppt/pr` to inject custom Markdown into the release PR body. This is especially useful for linking to CI artifacts, preview tools like `pkg-pr-new`, or nightly builds.
+> Custom PR Preambles: You can use the `pr-preamble` input on `uppt/pr` to inject custom Markdown into the release PR body. This is especially useful for linking to CI artifacts, preview tools like `pkg-pr-new`, or nightly builds.
 >
 > For a single plain text preamble applied to all branches:
 > ```yaml
