@@ -158,18 +158,18 @@ jobs:
 
 When `uppt` generates a release PR, the underlying branch (e.g., `release/vX.Y.Z`) only contains the specific commits that triggered the release along with the `package.json` version bumps. It does not reflect the fully integrated, up-to-date state of the target branch (e.g., `main`).
 
-Running standard CI pipelines (tests, linters) or preview tools like `pkg-pr-new` on these PRs wastes GitHub Actions minutes and produces broken or misleading artifacts due to the incomplete codebase.
+Running standard CI pipelines or preview tools like `pkg-pr-new` on a release branch checkout can produce misleading results because the branch may not contain later target-branch changes. A standard `pull_request` workflow normally checks out GitHub's merge ref, which includes the target branch.
 
-It is highly recommended to **exclude release branches** from your other pull request workflows. You can easily skip specific jobs on `uppt` release PRs by adding an `if` condition.
+Exclude release branches only from jobs that check out the release branch head, such as jobs triggered by `release/v*` pushes or jobs that explicitly check out the pull request head.
 
-For example, to rely on `main` pushes for some job and skip it on isolated release PRs:
+For example, to rely on `main` pushes for a job that uses the release branch head:
 
 ```yaml
 jobs:
   build:
     # Skip pkg-pr-new on uppt release PRs (they don't include later main merges). 
     # Rely on main pushes instead.
-    if: github.event_name == 'push' || !startsWith(github.head_ref, 'release/v')
+    if: (github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/release/v')) || (github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release/v'))
     runs-on: ubuntu-latest
     steps:
       # ...
