@@ -154,6 +154,27 @@ jobs:
 >
 > If base changes a manifest the release PR also bumps, the next run rebases the PR onto it, keeping its version. A release branch carrying other changes is left for you to update.
 
+### CI and PR Workflows Compatibility
+
+When `uppt` generates a release PR, the underlying branch (e.g., `release/vX.Y.Z`) only contains the specific commits that triggered the release along with the `package.json` version bumps. It does not reflect the fully integrated, up-to-date state of the target branch (e.g., `main`).
+
+Running standard CI pipelines (tests, linters) or preview tools like `pkg-pr-new` on these PRs wastes GitHub Actions minutes and produces broken or misleading artifacts due to the incomplete codebase.
+
+It is highly recommended to **exclude release branches** from your other pull request workflows. You can easily skip specific jobs on `uppt` release PRs by adding an `if` condition.
+
+For example, to rely on `main` pushes for some job and skip it on isolated release PRs:
+
+```yaml
+jobs:
+  build:
+    # Skip pkg-pr-new on uppt release PRs (they don't include later main merges). 
+    # Rely on main pushes instead.
+    if: github.event_name == 'push' || !startsWith(github.head_ref, 'release/v')
+    runs-on: ubuntu-latest
+    steps:
+      # ...
+```
+
 ### Inputs
 
 All subactions take a `node-version` input (default `24`; uppt needs `--experimental-strip-types`, so Node 22.6+ also works) and, where applicable, a `checkout` input (`true` by default; set to `false` if the caller has already checked out the right ref - `fetch-depth: 0` for `pr`, on the release PR's base for a `release/v*` push, the merge commit for `release`, the tag for `pack`).
