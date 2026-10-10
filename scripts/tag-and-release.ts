@@ -27,6 +27,14 @@
 //                          single release on a `release-YYYY-MM-DD`
 //                          coordination tag, and dispatches the publish
 //                          workflow with a `releases` payload input.
+//   REMOVE_PR_PREAMBLE     "true" to strip the PR preamble from the release PR
+//                          body before creating the release notes. The preamble
+//                          contains PR-specific information (like `pkg-pr-new`
+//                          preview links) that end consumers usually don't need
+//                          to see. By default, this is disabled (preamble is
+//                          kept) because publishing many staged packages in a
+//                          large monorepo can take a long time, and the preview
+//                          links remain useful during that window.
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
@@ -34,7 +42,11 @@ import { runMain } from './_cli.ts'
 import { parseDistTags } from './_dist-tags.ts'
 import { isPrerelease, isSemver, resolveCurrentVersion, resolveWorkspaces } from './_workspaces.ts'
 import { coordinationTag, deriveReleaseSet, packageTag, releaseTitle, serialiseReleases } from './_independent.ts'
-import { getAllTags, stripPlaceholderTimetable } from './update-changelog.ts'
+import {
+  getAllTags,
+  removePrPreamble,
+  stripPlaceholderTimetable,
+} from './update-changelog.ts';
 
 /**
  * dist-tags the publish job should use, and hence whether this release is the
@@ -158,7 +170,7 @@ function mainIndependent (repo: string, ghEnv: NodeJS.ProcessEnv) {
     }
   }
 
-  const body = stripPlaceholderTimetable(process.env.PR_BODY ?? '')
+  const body = prepareReleaseNotes()
   // A mixed set (some prerelease, some stable) still deserves to be latest,
   // so the prerelease check requires every released package to qualify.
   const flags = latestFlags({
@@ -171,6 +183,23 @@ function mainIndependent (repo: string, ghEnv: NodeJS.ProcessEnv) {
   run('gh', ['workflow', 'run', workflow, '--ref', coordTag, '-f', `releases=${serialiseReleases(releases)}`, ...distTagInput(distTags)], { env: ghEnv })
 
   console.log(`Tagged ${releases.length} package${releases.length === 1 ? '' : 's'} (${releases.map(packageTag).join(', ')}) plus ${coordTag}, created release, dispatched ${workflow}.`)
+}
+
+/**
+ * Prepare the release notes from the PR body, stripping out the placeholder
+ * timetable and optionally removing the PR preamble.
+ */
+export function prepareReleaseNotes(env: NodeJS.ProcessEnv = process.env): string {
+  let body = env.PR_BODY
+  if (!body) {
+    return ''
+  }
+
+  body = stripPlaceholderTimetable(body)
+
+  return env.REMOVE_PR_PREAMBLE === 'true'
+    ? removePrPreamble(body)
+    : body
 }
 
 export function main () {
@@ -207,7 +236,7 @@ export function main () {
   const sha = capture('git', ['rev-parse', 'HEAD'])
   createTag(repo, tag, sha, ghEnv)
 
-  const body = stripPlaceholderTimetable(process.env.PR_BODY ?? '')
+  const body = prepareReleaseNotes()
   run('gh', ['release', 'create', tag, '--title', tag, '--notes', body, ...flags], { env: ghEnv })
 
   const workflow = process.env.PUBLISH_WORKFLOW || 'release.yml'
