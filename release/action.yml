@@ -39,6 +39,10 @@ inputs:
     description: 'Whether to run when the repository is a fork. Defaults to `false` so a fork of a repo using uppt does not tag and publish releases of its own.'
     required: false
     default: 'false'
+  remove-pr-preamble:
+    description: 'Set to "true" to strip the PR preamble from the release PR body before creating the release notes.'
+    required: false
+    default: 'false'
 
 runs:
   using: composite
@@ -116,4 +120,5 @@ runs:
         NPM_TAG: ${{ inputs.npm-tag }}
         BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        REMOVE_PR_PREAMBLE: ${{ inputs.remove-pr-preamble }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/tag-and-release.ts
