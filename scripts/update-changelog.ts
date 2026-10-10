@@ -1280,6 +1280,31 @@ export function resolvePrPreamble(baseBranch: string): string | undefined {
   return envPreamble
 }
 
+/** PR preamble markers */
+export const PR_PREAMBLE_MARKERS = {
+  init: '<!-- uppt:pr-preamble:start -->',
+  end: '<!-- uppt:pr-preamble:end -->',
+} as const
+
+/** Create the PR preamble for a given base branch and intro. */
+export function createPrPreamble(baseBranch: string, intro: string): string {
+  const preamble = resolvePrPreamble(baseBranch)
+  return preamble
+    ? `${intro}\n>\n${TIMETABLE_PLACEHOLDER}\n\n${PR_PREAMBLE_MARKERS.init}\n${preamble}\n${PR_PREAMBLE_MARKERS.end}\n`
+    : `${intro}\n>\n${TIMETABLE_PLACEHOLDER}`
+}
+
+/** Remove the PR preamble and the markers from a PR body. */
+export function removePrPreamble(body: string): string {
+  const { init, end } = PR_PREAMBLE_MARKERS
+  const startIdx = body.indexOf(init)
+  const endIdx = body.indexOf(end, startIdx + init.length)
+  if (startIdx === -1 || endIdx === -1) {
+    return body
+  }
+  return (body.slice(0, startIdx) + body.slice(endIdx + end.length)).trimEnd()
+}
+
 export async function main () {
   const dryRun = Boolean(process.env.DRY_RUN)
   const repo = getRepo()
@@ -1417,13 +1442,9 @@ export async function main () {
   const currentPR = await findOpenPR(repo, releaseBranch)
   const intro = `> v${newVersion} is the next ${bump} release.`
 
-  const customPreamble = resolvePrPreamble(baseBranch)
-  const initialPreamble = customPreamble
-    ? `${intro}\n>\n${TIMETABLE_PLACEHOLDER}\n\n${customPreamble}`
-    : `${intro}\n>\n${TIMETABLE_PLACEHOLDER}`
   const preamble = (extractPreamble(currentPR?.body) || seedPreamble)
     ?.replace(/^> v\S+ is the next (?:major|minor|patch) release\.$/m, intro)
-    || initialPreamble
+    || createPrPreamble(baseBranch, intro)
 
   const body = [
     preamble,
@@ -1558,14 +1579,12 @@ async function runIndependent (packagesInput: string): Promise<void> {
 
   const currentPR = await findOpenPR(repo, releaseBranch)
 
-  const customPreamble = resolvePrPreamble(baseBranch)
-  const initialPreamble = customPreamble
-    ? `> The next set of package releases, covering all packages with unreleased changes.\n>\n${TIMETABLE_PLACEHOLDER}\n\n${customPreamble}`
-    : `> The next set of package releases, covering all packages with unreleased changes.\n>\n${TIMETABLE_PLACEHOLDER}`
-
   const preamble = extractPreamble(currentPR?.body)
     || seedPreamble
-    || initialPreamble
+    || createPrPreamble(
+      baseBranch,
+      '> The next set of package releases, covering all packages with unreleased changes.',
+    )
 
   const body = buildIndependentBody(plan, {
     owner: repo.owner,
