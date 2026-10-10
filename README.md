@@ -225,6 +225,7 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | `mode` | `lockstep` | `lockstep` or `independent`. Must match `uppt/pr`. See [Independent versioning](#independent-versioning-experimental). |
 | `npm-tag` | _(derived)_ | npm dist-tag override, passed on to the publish workflow. Derived as `<major>x` for a release merged into a non-default branch. See [Maintenance releases](#maintenance-releases). |
 | `allow-forks` | `false` | By default the action skips on forks so they don't tag or publish releases of their own. |
+| `remove-pr-preamble` | `false` | "true" to strip the PR preamble from the release PR body before creating the release notes. The preamble contains PR-specific information (like `pkg-pr-new` preview links) that end consumers usually don't need to see. By default, this is disabled (preamble is kept) because publishing many staged packages in a large monorepo can take a long time, and the preview links remain useful during that window. |
 </details>
 
 <details>
