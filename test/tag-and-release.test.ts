@@ -321,13 +321,14 @@ describe('prepareReleaseNotes', () => {
 
   it('should keep the preamble if REMOVE_PR_PREAMBLE is not "true"', () => {
     const env = {
-      PR_BODY: `>Intro\n${TIMETABLE_PLACEHOLDER}.\n\n${PR_PREAMBLE_MARKERS.init}\nPreamble\n${PR_PREAMBLE_MARKERS.end}\n## Changelog`
+      PR_BODY: `>Intro\n${TIMETABLE_PLACEHOLDER}\n\n${PR_PREAMBLE_MARKERS.init}\nPreamble\n${PR_PREAMBLE_MARKERS.end}\n## Changelog`
     }
     const result = prepareReleaseNotes(env)
 
     // The timetable is removed (by stripPlaceholderTimetable) but the preamble remains
-    expect(result).not.toContain('Timetable: to be announced')
+    expect(result).not.toContain(TIMETABLE_PLACEHOLDER)
     expect(result).toContain(PR_PREAMBLE_MARKERS.init)
+    expect(result).toContain(PR_PREAMBLE_MARKERS.end)
     expect(result).toContain('Preamble')
   })
 
@@ -339,8 +340,9 @@ describe('prepareReleaseNotes', () => {
     const result = prepareReleaseNotes(env)
 
     // Both the timetable and the preamble are removed
-    expect(result).not.toContain('Timetable: to be announced')
+    expect(result).not.toContain(TIMETABLE_PLACEHOLDER)
     expect(result).not.toContain(PR_PREAMBLE_MARKERS.init)
+    expect(result).not.toContain(PR_PREAMBLE_MARKERS.end)
     expect(result).not.toContain('Preamble')
     expect(result).toContain('## Changelog')
   })
