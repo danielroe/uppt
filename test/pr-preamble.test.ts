@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { resolvePrPreamble } from '../scripts/update-changelog.ts'
+import { createPrPreamble, PR_PREAMBLE_MARKERS, removePrPreamble, resolvePrPreamble } from '../scripts/update-changelog.ts'
 
 describe('resolvePrPreamble', () => {
 	const originalEnv = process.env.PR_PREAMBLE
@@ -85,5 +85,63 @@ describe('resolvePrPreamble', () => {
 	it('ignores mapped values that are empty strings or just whitespace', () => {
 		process.env.PR_PREAMBLE = JSON.stringify({ main: '   ', default: '📦 Fallback' })
 		expect(resolvePrPreamble('main')).toBe('📦 Fallback')
+	})
+})
+
+describe('removePrPreamble', () => {
+	it('should remove the full preamble along with the markers', () => {
+		const originalBody = [
+			'Intro text',
+			PR_PREAMBLE_MARKERS.init,
+			'My custom preamble with links to pkg-pr-new',
+			PR_PREAMBLE_MARKERS.end,
+			'',
+			'## Changelog',
+			'- Fix: resolved an issue'
+		].join('\n')
+
+		const result = removePrPreamble(originalBody)
+
+		// Verify that markers and intermediate content are removed
+		expect(result).not.toContain(PR_PREAMBLE_MARKERS.init)
+		expect(result).not.toContain('My custom preamble')
+		expect(result).not.toContain(PR_PREAMBLE_MARKERS.end)
+
+		// Verify that the rest of the text (intro and changelog) remains intact
+		expect(result).toContain('Intro text')
+		expect(result).toContain('## Changelog')
+	})
+
+	it('should return the original text if there are no markers', () => {
+		const body = 'Intro text\n\n## Changelog\n- Fix bug'
+		expect(removePrPreamble(body)).toBe(body)
+	})
+
+	it('should return the original text if only the start marker is present (malformed manual PR edit)', () => {
+		const body = `Intro text\n${PR_PREAMBLE_MARKERS.init}\nEndless preamble`
+		expect(removePrPreamble(body)).toBe(body)
+	})
+})
+
+describe('createPrPreamble', () => {
+	it('should inject markers when a preamble is resolved', () => {
+		// Note: Depending on your test suite setup, you will need to mock the function or input
+		// (e.g., process.env or config) that makes `resolvePrPreamble(baseBranch)` return a valid string.
+
+		const intro = '> v1.0.0 is the next patch release.'
+		const result = createPrPreamble('main', intro)
+
+		// If mocked correctly and a preamble exists, it should contain the markers
+		// expect(result).toContain(PR_PREAMBLE_MARKERS.init)
+		// expect(result).toContain(PR_PREAMBLE_MARKERS.end)
+	})
+
+	it('should not inject markers if no preamble is configured', () => {
+		// Mock here to return undefined/falsy
+		const intro = '> v1.0.0 is the next patch release.'
+		const result = createPrPreamble('main', intro)
+
+		expect(result).not.toContain(PR_PREAMBLE_MARKERS.init)
+		expect(result).not.toContain(PR_PREAMBLE_MARKERS.end)
 	})
 })
