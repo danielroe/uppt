@@ -25,6 +25,10 @@
 //   SCOPES             newline-separated "<package-name>: <scope> ..."
 //                      overrides for routing commit scopes to workspaces
 //                      in independent mode
+//   PR_PREAMBLE        custom Markdown to append to the initial PR preamble
+//                      (e.g. preview links). If a JSON string is provided,
+//                      it will map target branch names to specific preamble
+//                      strings
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
@@ -1235,6 +1239,72 @@ export function buildIndependentBody (
   return lines.join('\n').trimEnd()
 }
 
+/**
+ * The maintainer can set a different preamble for each base branch, or a
+ * `default` entry to use when no branch-specific entry exists. If the
+ * value is not valid JSON, it is used verbatim for all branches.
+ * ```yaml
+ * with:
+ *   pr-preamble: |
+ *     {
+ *       "main": "📦 [View pkg-pr-new for main](...)",
+ *       "v3.x": "📦 [View pkg-pr-new for v3.x](...)",
+ *       "default": "📦 Test the latest changes"
+ *     }
+ * ```
+ * @param baseBranch The base branch of the preamble to resolve.
+ * @return The preamble for the given base branch, or `undefined` if none is set.
+ */
+export function resolvePrPreamble(baseBranch: string): string | undefined {
+  const envPreamble = process.env.PR_PREAMBLE?.trim()
+  if (!envPreamble) {
+    return undefined
+  }
+
+  try {
+    const parsed = JSON.parse(envPreamble)
+    if (typeof parsed === 'object' && parsed !== null) {
+      const pick = (key: string): string | undefined => {
+        if (!Object.prototype.hasOwnProperty.call(parsed, key)) {
+          return undefined
+        }
+        const value = (parsed as Record<string, unknown>)[key]
+        return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+      }
+      return pick(baseBranch) ?? pick('default')
+    }
+  } catch {
+    return envPreamble
+  }
+
+  return envPreamble
+}
+
+/** PR preamble markers */
+export const PR_PREAMBLE_MARKERS = {
+  init: '<!-- uppt:pr-preamble:start -->',
+  end: '<!-- uppt:pr-preamble:end -->',
+} as const
+
+/** Create the PR preamble for a given base branch and intro. */
+export function createPrPreamble(baseBranch: string, intro: string): string {
+  const preamble = resolvePrPreamble(baseBranch)
+  return preamble
+    ? `${intro}\n>\n${TIMETABLE_PLACEHOLDER}\n\n${PR_PREAMBLE_MARKERS.init}\n${preamble}\n${PR_PREAMBLE_MARKERS.end}\n`
+    : `${intro}\n>\n${TIMETABLE_PLACEHOLDER}`
+}
+
+/** Remove the PR preamble and the markers from a PR body. */
+export function removePrPreamble(body: string): string {
+  const { init, end } = PR_PREAMBLE_MARKERS
+  const startIdx = body.indexOf(init)
+  const endIdx = body.indexOf(end, startIdx + init.length)
+  if (startIdx === -1 || endIdx === -1) {
+    return body
+  }
+  return (body.slice(0, startIdx) + body.slice(endIdx + end.length)).trimEnd()
+}
+
 export async function main () {
   const dryRun = Boolean(process.env.DRY_RUN)
   const repo = getRepo()
@@ -1371,9 +1441,10 @@ export async function main () {
 
   const currentPR = await findOpenPR(repo, releaseBranch)
   const intro = `> v${newVersion} is the next ${bump} release.`
+
   const preamble = (extractPreamble(currentPR?.body) || seedPreamble)
     ?.replace(/^> v\S+ is the next (?:major|minor|patch) release\.$/m, intro)
-    || `${intro}\n>\n${TIMETABLE_PLACEHOLDER}`
+    || createPrPreamble(baseBranch, intro)
 
   const body = [
     preamble,
@@ -1507,9 +1578,13 @@ async function runIndependent (packagesInput: string): Promise<void> {
   const contributors = await getContributors(uniqueCommits, repo, cutoff)
 
   const currentPR = await findOpenPR(repo, releaseBranch)
+
   const preamble = extractPreamble(currentPR?.body)
     || seedPreamble
-    || `> The next set of package releases, covering all packages with unreleased changes.\n>\n${TIMETABLE_PLACEHOLDER}`
+    || createPrPreamble(
+      baseBranch,
+      '> The next set of package releases, covering all packages with unreleased changes.',
+    )
 
   const body = buildIndependentBody(plan, {
     owner: repo.owner,
