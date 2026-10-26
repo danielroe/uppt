@@ -976,6 +976,22 @@ describe('releaseBranchDrift', () => {
       baseTouched: ['packages/a/package.json'],
     })).toBe('base has since changed packages/a/package.json')
   })
+
+  it('rebuilds when a single-commit branch has a different message', () => {
+    expect(releaseBranchDrift({
+      ...inSync,
+      divergence: { ...inSync.divergence, commitMessages: ['v1.1.0'] },
+      message: 'chore(release): v1.1.0',
+    })).toBe('commit message differs from the plan')
+  })
+
+  it('ignores commit messages on a branch with several commits', () => {
+    expect(releaseBranchDrift({
+      ...inSync,
+      divergence: { ...inSync.divergence, commitMessages: ['v1.1.0', 'chore: hand edit'] },
+      message: 'chore(release): v1.1.0',
+    })).toBe(null)
+  })
 })
 
 describe('isSupersededReleaseBranch', () => {

@@ -791,6 +791,8 @@ export interface BranchDivergence {
   changed: Set<string>
   mergeBase: string
   behindBy: number
+  /** Messages of the commits the branch has on top of its merge base. */
+  commitMessages?: string[]
 }
 
 /**
@@ -814,6 +816,8 @@ export function releaseBranchDrift (opts: {
   keepOtherChanges?: boolean
   /** Defaults to exact equality. */
   isCurrent?: (branch: string | null, desired: string) => boolean
+  /** Desired message for a branch made of a single commit. */
+  message?: string
 }): string | null {
   if (!opts.divergence) return 'branch does not exist'
 
@@ -830,6 +834,11 @@ export function releaseBranchDrift (opts: {
   }
 
   if (opts.baseTouched.length) return `base has since changed ${opts.baseTouched.join(', ')}`
+
+  const messages = opts.divergence.commitMessages
+  if (opts.message !== undefined && messages?.length === 1 && messages[0] !== opts.message) {
+    return 'commit message differs from the plan'
+  }
 
   return null
 }
@@ -864,13 +873,14 @@ async function syncReleaseBranch (
 
   let divergence: BranchDivergence | null = null
   try {
-    const cmp = await gh<{ files?: Array<{ filename: string }>, merge_base_commit: { sha: string }, behind_by: number }>(
+    const cmp = await gh<{ files?: Array<{ filename: string }>, commits?: Array<{ commit: { message: string } }>, merge_base_commit: { sha: string }, behind_by: number }>(
       `/repos/${repo.owner}/${repo.repo}/compare/${encodeURIComponent(opts.base)}...${encodeURIComponent(opts.branch)}`,
     )
     divergence = {
       changed: new Set((cmp.files ?? []).map(file => file.filename)),
       mergeBase: cmp.merge_base_commit.sha,
       behindBy: cmp.behind_by,
+      commitMessages: cmp.commits?.map(c => c.commit.message),
     }
   } catch (err) {
     if (!(err instanceof Error) || !/-> 404\b/.test(err.message)) throw err
@@ -899,6 +909,7 @@ async function syncReleaseBranch (
     baseTouched,
     keepOtherChanges: opts.keepOtherChanges,
     isCurrent: opts.isCurrent,
+    message: opts.message,
   })
   if (!drift) {
     console.log(`Branch ${opts.branch} already carries the release plan; leaving it untouched.`)
@@ -1239,7 +1250,7 @@ export function buildIndependentBody (
 }
 
 function renderTitle (template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (match, key: string) => {
+  return template.replace(/\{([^{}]*)\}/g, (match, key: string) => {
     if (!Object.hasOwn(vars, key)) {
       const known = Object.keys(vars).map(k => `\`{${k}}\``).join(', ')
       throw new Error(`Unknown placeholder \`${match}\` in the \`title\` input; expected ${known}.`)
