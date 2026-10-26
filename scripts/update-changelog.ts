@@ -1106,7 +1106,7 @@ export function stripPrNotes (body: string): string {
 }
 
 function prNotes (vars: { base: string, version?: string }): string {
-  return (process.env.PR_NOTES ?? '').trim()
+  return (process.env.PR_NOTES ?? '').replace(/^\s*\n/, '').trimEnd()
     .replace(/\{(base|version)\}/g, (match, key: 'base' | 'version') => vars[key] ?? match)
 }
 
@@ -1414,12 +1414,13 @@ export async function main () {
 
   const currentPR = await findOpenPR(repo, releaseBranch)
   const intro = `> v${newVersion} is the next ${bump} release.`
-  const existingPreamble = (extractPreamble(currentPR?.body) || seedPreamble)
+  const currentPreamble = extractPreamble(currentPR?.body)
+  const existingPreamble = (currentPreamble || seedPreamble)
     ?.replace(/^> v\S+ is the next (?:major|minor|patch) release\.$/m, intro)
   const preamble = setPrNotes(
     existingPreamble || `${intro}\n>\n${TIMETABLE_PLACEHOLDER}`,
     prNotes({ base: baseBranch, version: newVersion }),
-    !existingPreamble,
+    !currentPreamble,
   )
 
   const body = [
@@ -1557,11 +1558,11 @@ async function runIndependent (packagesInput: string): Promise<void> {
   const contributors = await getContributors(uniqueCommits, repo, cutoff)
 
   const currentPR = await findOpenPR(repo, releaseBranch)
-  const existingPreamble = extractPreamble(currentPR?.body) || seedPreamble
+  const currentPreamble = extractPreamble(currentPR?.body)
   const preamble = setPrNotes(
-    existingPreamble || `> The next set of package releases, covering all packages with unreleased changes.\n>\n${TIMETABLE_PLACEHOLDER}`,
+    currentPreamble || seedPreamble || `> The next set of package releases, covering all packages with unreleased changes.\n>\n${TIMETABLE_PLACEHOLDER}`,
     prNotes({ base: baseBranch }),
-    !existingPreamble,
+    !currentPreamble,
   )
 
   const body = buildIndependentBody(plan, {

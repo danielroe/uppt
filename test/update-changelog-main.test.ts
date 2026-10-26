@@ -716,6 +716,25 @@ describe('lockstep main', () => {
     await main()
     expect(prBody()).toMatch(/^> keep me\n\n## 👉 Changelog/)
   })
+
+  it('adds pr-notes to a new PR that inherits a superseded preamble', async () => {
+    process.env.PR_NOTES = 'new notes'
+    api.openPRs = [{
+      number: 3,
+      body: '> old intro\n\n## 👉 Changelog\n\nstuff',
+      head: { ref: 'release/v1.2.4', repo: { full_name: 'owner/repo' } },
+      base: { ref: 'main' },
+      updated_at: '2024-01-02T00:00:00Z',
+    }]
+    await main()
+    expect(prBody()).toMatch(/^> old intro\n\n<!-- uppt:pr-notes:start -->\nnew notes\n<!-- uppt:pr-notes:end -->\n\n## 👉 Changelog/)
+  })
+
+  it('keeps the leading indentation of pr-notes', async () => {
+    process.env.PR_NOTES = '\n    indented code\n'
+    await main()
+    expect(prBody()).toContain('<!-- uppt:pr-notes:start -->\n    indented code\n<!-- uppt:pr-notes:end -->')
+  })
 })
 
 describe('lockstep main with a hand-edited version', () => {
@@ -1050,6 +1069,19 @@ describe('independent main', () => {
       expect.objectContaining({ method: 'PATCH', path: '/repos/owner/repo/pulls/5', body: { state: 'closed' } }),
     ]))
     expect(prBody()).toContain('> lockstep intro')
+  })
+
+  it('adds pr-notes to a pending PR that inherits a superseded preamble', async () => {
+    process.env.PR_NOTES = 'new notes'
+    api.openPRs = [{
+      number: 5,
+      body: '> lockstep intro',
+      head: { ref: 'release/v1.2.4', repo: { full_name: 'owner/repo' } },
+      base: { ref: 'main' },
+      updated_at: '2024-01-02T00:00:00Z',
+    }]
+    await main()
+    expect(prBody()).toMatch(/^> lockstep intro\n\n<!-- uppt:pr-notes:start -->\nnew notes\n<!-- uppt:pr-notes:end -->/)
   })
 
   it('updates an existing pending PR and keeps its preamble', async () => {
