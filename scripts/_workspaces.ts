@@ -183,6 +183,28 @@ export function isPrerelease (version: string): boolean {
   return /^\d+\.\d+\.\d+-/.test(version)
 }
 
+/** Semver precedence of two versions, ignoring build metadata. */
+export function compareSemver (a: string, b: string): number {
+  const parse = (v: string) => {
+    const [core, ...pre] = v.replace(/\+.*$/, '').split('-')
+    return { core: core!.split('.').map(Number), pre: pre.length ? pre.join('-').split('.') : [] }
+  }
+  const [pa, pb] = [parse(a), parse(b)]
+  for (let i = 0; i < 3; i++) {
+    if (pa.core[i] !== pb.core[i]) return pa.core[i]! - pb.core[i]!
+  }
+  if (!pa.pre.length || !pb.pre.length) return pb.pre.length - pa.pre.length
+  for (let i = 0; i < Math.min(pa.pre.length, pb.pre.length); i++) {
+    const [x, y] = [pa.pre[i]!, pb.pre[i]!]
+    if (x === y) continue
+    const [nx, ny] = [/^\d+$/.test(x), /^\d+$/.test(y)]
+    if (nx && ny) return x.length - y.length || (x < y ? -1 : 1)
+    if (nx !== ny) return nx ? -1 : 1
+    return x < y ? -1 : 1
+  }
+  return pa.pre.length - pb.pre.length
+}
+
 /** Identifier that continues the prerelease line of `version`, or `''` for a stable version. */
 export function prereleaseIdentifier (version: string): string {
   const pre = version.match(/^\d+\.\d+\.\d+-([0-9a-zA-Z.-]+)$/)?.[1]

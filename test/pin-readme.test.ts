@@ -23,7 +23,7 @@ function contents (readme: string) {
   return { sha: 'filesha', encoding: 'base64', content: Buffer.from(readme, 'utf8').toString('base64') }
 }
 
-const README = 'uses: danielroe/uppt/pr@old # v0.0.1\nuses: danielroe/uppt/publish@old\n'
+const README = 'uses: danielroe/uppt/pr@old # v0.0.1\nuses: danielroe/uppt/publish@old\nuses: danielroe/uppt/dist-tag@old\n'
 
 beforeEach(() => {
   env = { ...process.env }
@@ -101,7 +101,7 @@ describe('pin-readme', () => {
     const [, init] = fetchMock.mock.calls.at(-1)!
     const sent = JSON.parse(init.body as string) as { content: string, message: string, sha: string, branch: string }
     expect(Buffer.from(sent.content, 'base64').toString('utf8')).toBe(
-      `uses: danielroe/uppt/pr@${SHA} # v1.2.3\nuses: danielroe/uppt/publish@${SHA} # v1.2.3\n`,
+      `uses: danielroe/uppt/pr@${SHA} # v1.2.3\nuses: danielroe/uppt/publish@${SHA} # v1.2.3\nuses: danielroe/uppt/dist-tag@${SHA} # v1.2.3\n`,
     )
     expect(sent).toMatchObject({ message: 'chore: pin README example to v1.2.3', sha: 'filesha', branch: 'main' })
   })

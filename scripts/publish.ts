@@ -21,9 +21,17 @@
 // every tarball, and is required when a tarball's filename carries no
 // parseable version.
 //
+// `NPM_TAG` may list several tags. The first is the publish tag; the
+// rest are added with `npm dist-tag add` straight after a nightly
+// publish, or written to the `dist-tags` output for `uppt/dist-tag` to
+// apply once a staged version has been approved.
+//
 // Env:
 //   NPM_ACCESS      `public` (default) or `restricted`
-//   NPM_TAG         optional dist-tag override for every tarball
+//   NPM_TAG         optional dist-tag override for every tarball; a
+//                   whitespace- or comma-separated list adds the
+//                   remaining tags alongside the first
+//   GITHUB_OUTPUT   set by the runner; receives `dist-tags=<json>`
 //   TARBALL_DIR     directory holding the prebuilt `*.tgz` files
 //   TARBALL_FILES   optional JSON array of filenames within TARBALL_DIR
 //   RELEASES        optional JSON payload emitted by `uppt/release` in
@@ -35,12 +43,12 @@
 
 import process from 'node:process'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, readdirSync } from 'node:fs'
+import { appendFileSync, existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { runMain } from './_cli.ts'
+import { addDistTags, parseDistTags, tarballManifest, type DistTagEntry } from './_dist-tags.ts'
 import { expectedTarballName, releasesFromEnv } from './_independent.ts'
-import { isSemver } from './_workspaces.ts'
 
 function run (cmd: string, args: string[]) {
   console.log('$', cmd, ...args)
@@ -81,7 +89,6 @@ function parseTarballFiles (raw: string): string[] {
 }
 
 const TARBALL_VERSION_RE = /-(\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?)\.tgz$/
-const DIST_TAG_RE = /^[a-z0-9][\w.-]*$/i
 
 /** Version embedded in a `npm pack` tarball filename, if it has one. */
 export function versionFromTarballName (tarball: string): string | null {
@@ -117,10 +124,7 @@ function tagFor (tarball: string, override: string | undefined): string {
 export function main () {
   const access = process.env.NPM_ACCESS === 'restricted' ? 'restricted' : 'public'
 
-  const tagOverride = process.env.NPM_TAG?.trim() || undefined
-  if (tagOverride && (!DIST_TAG_RE.test(tagOverride) || isSemver(tagOverride))) {
-    throw new Error(`NPM_TAG is not a valid dist-tag: ${JSON.stringify(tagOverride)}`)
-  }
+  const [tagOverride, ...extraTags] = parseDistTags(process.env.NPM_TAG, 'NPM_TAG')
 
   const dir = process.env.TARBALL_DIR
   if (!dir) throw new Error('TARBALL_DIR is required')
@@ -150,6 +154,7 @@ export function main () {
     }
   }
 
+  const pending: DistTagEntry[] = []
   for (const tarball of tarballs) {
     const tarballPath = resolve(dir, tarball)
     if (!existsSync(tarballPath)) {
@@ -157,6 +162,15 @@ export function main () {
     }
     const publish = nightly ? runTolerating403 : run
     publish('npm', [...command, tarballPath, '--provenance', '--ignore-scripts', `--access=${access}`, `--tag=${tagFor(tarball, defaultTag)}`])
+    if (!extraTags.length) continue
+    const entry = { ...tarballManifest(tarballPath), tags: extraTags }
+    if (nightly) addDistTags(entry)
+    else pending.push(entry)
+  }
+
+  const githubOutput = process.env.GITHUB_OUTPUT
+  if (githubOutput) {
+    appendFileSync(githubOutput, `dist-tags=${JSON.stringify(pending)}\n`)
   }
 }
 

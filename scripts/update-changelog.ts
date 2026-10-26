@@ -37,7 +37,7 @@ import { resolve } from 'node:path'
 import { runMain } from './_cli.ts'
 import { makePkgFormatter } from './pkg-format.ts'
 
-import { buildScopeMap, isPrerelease, parseScopesInput, prereleaseIdentifier, resolveCurrentVersion, resolveWorkspaces, type Workspace } from './_workspaces.ts'
+import { buildScopeMap, compareSemver, isPrerelease, parseScopesInput, prereleaseIdentifier, resolveCurrentVersion, resolveWorkspaces, type Workspace } from './_workspaces.ts'
 import { buildDependencyGraph, DEPENDENCY_FIELDS, propagateReleases, type BumpLevel } from './_dependency-graph.ts'
 
 export interface Commit {
@@ -1085,21 +1085,6 @@ function bumpBetween (from: string, to: string): BumpLevel {
   return 'patch'
 }
 
-/** Semver precedence of the prerelease suffixes of two versions sharing a core. */
-function comparePrerelease (a: string, b: string): number {
-  const ids = (v: string) => v.split('-').slice(1).join('-').split('.')
-  const [pa, pb] = [ids(a), ids(b)]
-  for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
-    const [x, y] = [pa[i]!, pb[i]!]
-    if (x === y) continue
-    const [nx, ny] = [/^\d+$/.test(x), /^\d+$/.test(y)]
-    if (nx && ny) return Number(x) - Number(y)
-    if (nx !== ny) return nx ? -1 : 1
-    return x < y ? -1 : 1
-  }
-  return pa.length - pb.length
-}
-
 /** Hand-set version on a lockstep release branch, or `null` if none is usable. */
 export function resolvePinnedVersion (opts: {
   headRef: string
@@ -1122,7 +1107,7 @@ export function resolvePinnedVersion (opts: {
     console.log(`::warning::Ignoring hand-edited version "${pinned}" on ${opts.headRef}: expected strict "X.Y.Z" semver.`)
     return null
   }
-  if ((compareVersions(pinned, opts.currentVersion) || comparePrerelease(pinned, opts.currentVersion)) <= 0) {
+  if (compareSemver(pinned, opts.currentVersion) <= 0) {
     console.log(`::warning::Ignoring hand-edited version "${pinned}" on ${opts.headRef}: not above the current version ${opts.currentVersion}.`)
     return null
   }
