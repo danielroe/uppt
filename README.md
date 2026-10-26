@@ -154,25 +154,14 @@ jobs:
 >
 > If base changes a manifest the release PR also bumps, the next run rebases the PR onto it, keeping its version. A release branch carrying other changes is left for you to update.
 
-### CI and PR Workflows Compatibility
+### CI on release branches
 
-When `uppt` generates a release PR, the underlying branch (e.g., `release/vX.Y.Z`) only contains the specific commits that triggered the release along with the `package.json` version bumps. It does not reflect the fully integrated, up-to-date state of the target branch (e.g., `main`).
-
-Running standard CI pipelines or preview tools like `pkg-pr-new` on a release branch checkout can produce misleading results because the branch may not contain later target-branch changes. A standard `pull_request` workflow normally checks out GitHub's merge ref, which includes the target branch.
-
-Exclude release branches only from jobs that check out the release branch head, such as jobs triggered by `release/v*` pushes or jobs that explicitly check out the pull request head.
-
-For example, to rely on `main` pushes for a job that uses the release branch head:
+A release branch is a version bump on top of the base branch as it was when uppt last rebuilt it, so it can lag behind later merges. `pull_request` workflows check out GitHub's merge ref, which includes the base, but jobs that build the branch head (a `push` trigger matching `release/v*`, or a checkout of the PR head) do not. For a job like that, skip release branches and rely on base branch pushes instead:
 
 ```yaml
 jobs:
-  build:
-    # Skip pkg-pr-new on uppt release PRs (they don't include later main merges). 
-    # Rely on main pushes instead.
-    if: (github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/release/v')) || (github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release/v'))
-    runs-on: ubuntu-latest
-    steps:
-      # ...
+  preview:
+    if: ${{ !startsWith(github.head_ref || github.ref_name, 'release/v') }}
 ```
 
 ### Inputs
@@ -190,30 +179,16 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | `allow-forks` | `false` | By default the action skips on forks so they don't open release PRs of their own. |
 | `prerelease` | _(unset)_ | One-shot prerelease identifier (`beta`, `rc`, or a bare number). See [Prereleases](#prereleases). |
 | `title` | `v{version}` | Template for the release PR title and commit message, e.g. `chore(release): v{version}`. In [independent mode](#independent-versioning-experimental) the placeholders are `{count}` and `{packages}` (`package` or `packages`), and the default is `chore: release {count} {packages}`. |
-| `pr-preamble` | _(unset)_ | Custom Markdown to append to the initial PR preamble (e.g. preview links). If a JSON string is provided, it maps target branch names to specific preamble strings. |
+| `pr-notes` | _(unset)_ | Markdown to show in the release PR body below the timetable, such as links to preview builds. `{base}` is replaced with the base branch. See below. |
 
-> **💡 Tip: Custom PR Preambles:** You can use the `pr-preamble` input on `uppt/pr` to inject custom Markdown into the release PR body. This is especially useful for linking to CI artifacts, preview tools like `pkg-pr-new`, or nightly builds.
->
-> For a single plain text preamble applied to all branches, using `pkg-pr-new` workflow as an example (replace `main` with your corresponding branch name), you can do:
-> ```yaml
-> - uses: danielroe/uppt/pr@<sha-of-latest-release>
->   with:
->     pr-preamble: "## ⚡ Test the latest changes that will be included in this release\n\n[📦 View `pkg-pr-new` packages from the latest commit on main](https://github.com/<username-organization>/<repository>/actions/workflows/pkg-pr-new.yml?query=branch%3Amain)"
-> ```
->
-> To target specific base branches, pass a valid JSON string. This is helpful when maintaining multiple release lines (the script falls back to `default` if the branch isn't listed), following with the `pkg-pr-new` workflow example:
-> ```yaml
-> - uses: danielroe/uppt/pr@<sha-of-latest-release>
->   with:
->     pr-preamble: |
->       {
->         "main": "## ⚡ Test the latest changes that will be included in this release\n\n[📦 View `pkg-pr-new` packages from the latest commit on main](https://github.com/<username-organization>/<repository>/actions/workflows/pkg-pr-new.yml?query=branch%3Amain)",
->         "3.x": "## ⚡ Test the latest changes that will be included in this release\n\n[📦 View `pkg-pr-new` packages from the latest commit on 3.x](https://github.com/<username-organization>/<repository>/actions/workflows/pkg-pr-new.yml?query=branch%3A3.x)",
->         "default": "## 🚀 Release Notice\n\nPreview builds are being generated..."
->       }
-> ```
->
-> *(Note: To ensure the `pkg-pr-new` preview links always have valid artifacts, remember to configure your `pkg-pr-new.yml` workflow to run on `push` events to your base branches like `main`.)*
+uppt keeps `pr-notes` in a marked block of the release PR body, refreshes it on every run, and leaves it out of the GitHub release notes. For example, to link to [`pkg-pr-new`](https://github.com/stackblitz-labs/pkg.pr.new) builds of the base branch:
+
+```yaml
+- uses: danielroe/uppt/pr@<sha>
+  with:
+    pr-notes: |
+      [📦 Try the latest `{base}` build](https://github.com/<owner>/<repo>/actions/workflows/pkg-pr-new.yml?query=branch%3A{base})
+```
 </details>
 
 <details>
@@ -226,7 +201,6 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | `mode` | `lockstep` | `lockstep` or `independent`. Must match `uppt/pr`. See [Independent versioning](#independent-versioning-experimental). |
 | `npm-tag` | _(derived)_ | npm dist-tag override, passed on to the publish workflow. Derived as `<major>x` for a release merged into a non-default branch. Accepts a list (`latest 4x`). See [Maintenance releases](#maintenance-releases) and [Multiple dist-tags](#multiple-dist-tags). |
 | `allow-forks` | `false` | By default the action skips on forks so they don't tag or publish releases of their own. |
-| `remove-pr-preamble` | `false` | "true" to strip the PR preamble from the release PR body before creating the release notes. The preamble contains PR-specific information (like `pkg-pr-new` preview links) that end consumers usually don't need to see. By default, this is disabled (preamble is kept) because publishing many staged packages in a large monorepo can take a long time, and the preview links remain useful during that window. |
 </details>
 
 <details>

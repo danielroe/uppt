@@ -3,11 +3,6 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import process from 'node:process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { prepareReleaseNotes } from '../scripts/tag-and-release.ts';
-import {
-  PR_PREAMBLE_MARKERS,
-  TIMETABLE_PLACEHOLDER,
-} from '../scripts/update-changelog.ts';
 
 const execFileSync = vi.hoisted(() => vi.fn())
 vi.mock('node:child_process', () => ({ execFileSync }))
@@ -102,6 +97,12 @@ describe('tag-and-release', () => {
 
   it('drops the untouched placeholder timetable from the release notes', () => {
     process.env.PR_BODY = '> v1.2.3 is the next patch release.\n>\n> **Timetable**: to be announced.\n\n## 👉 Changelog'
+    main()
+    expect(ghCalls().at(-2)).toEqual(['release', 'create', 'v1.2.3', '--title', 'v1.2.3', '--notes', '> v1.2.3 is the next patch release.\n\n## 👉 Changelog'])
+  })
+
+  it('drops the pr-notes block from the release notes', () => {
+    process.env.PR_BODY = '> v1.2.3 is the next patch release.\n>\n> **Timetable**: to be announced.\n\n<!-- uppt:pr-notes:start -->\npreview links\n<!-- uppt:pr-notes:end -->\n\n## 👉 Changelog'
     main()
     expect(ghCalls().at(-2)).toEqual(['release', 'create', 'v1.2.3', '--title', 'v1.2.3', '--notes', '> v1.2.3 is the next patch release.\n\n## 👉 Changelog'])
   })
@@ -326,39 +327,5 @@ describe('tag-and-release', () => {
       main()
       expect(log.mock.calls.at(-1)?.[0]).toMatch(/Tagged 2 packages/)
     })
-  })
-})
-
-describe('prepareReleaseNotes', () => {
-  it('should return an empty string if there is no PR_BODY', () => {
-    expect(prepareReleaseNotes({})).toBe('')
-  })
-
-  it('should keep the preamble if REMOVE_PR_PREAMBLE is not "true"', () => {
-    const env = {
-      PR_BODY: `>Intro\n${TIMETABLE_PLACEHOLDER}\n\n${PR_PREAMBLE_MARKERS.init}\nPreamble\n${PR_PREAMBLE_MARKERS.end}\n## Changelog`
-    }
-    const result = prepareReleaseNotes(env)
-
-    // The timetable is removed (by stripPlaceholderTimetable) but the preamble remains
-    expect(result).not.toContain(TIMETABLE_PLACEHOLDER)
-    expect(result).toContain(PR_PREAMBLE_MARKERS.init)
-    expect(result).toContain(PR_PREAMBLE_MARKERS.end)
-    expect(result).toContain('Preamble')
-  })
-
-  it('should remove the preamble if REMOVE_PR_PREAMBLE is "true"', () => {
-    const env = {
-      PR_BODY: `>Intro\n${TIMETABLE_PLACEHOLDER}\n\n${PR_PREAMBLE_MARKERS.init}\nPreamble\n${PR_PREAMBLE_MARKERS.end}\n## Changelog`,
-      REMOVE_PR_PREAMBLE: 'true'
-    }
-    const result = prepareReleaseNotes(env)
-
-    // Both the timetable and the preamble are removed
-    expect(result).not.toContain(TIMETABLE_PLACEHOLDER)
-    expect(result).not.toContain(PR_PREAMBLE_MARKERS.init)
-    expect(result).not.toContain(PR_PREAMBLE_MARKERS.end)
-    expect(result).not.toContain('Preamble')
-    expect(result).toContain('## Changelog')
   })
 })

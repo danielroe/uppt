@@ -28,10 +28,9 @@
 //   TITLE              release PR title and commit message template, with
 //                      `{version}` in lockstep mode and `{count}` /
 //                      `{packages}` in independent mode
-//   PR_PREAMBLE        custom Markdown to append to the initial PR preamble
-//                      (e.g. preview links). If a JSON string is provided,
-//                      it will map target branch names to specific preamble
-//                      strings
+//   PR_NOTES           Markdown kept in a marked block of the release PR
+//                      preamble and refreshed on every run; `{base}` is
+//                      replaced with the base branch
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
@@ -1081,6 +1080,35 @@ export function stripPlaceholderTimetable (body: string): string {
     .replaceAll(`\n${TIMETABLE_PLACEHOLDER}`, '')
 }
 
+const PR_NOTES_START = '<!-- uppt:pr-notes:start -->'
+const PR_NOTES_END = '<!-- uppt:pr-notes:end -->'
+const PR_NOTES_RE = /\n*<!-- uppt:pr-notes:start -->[\s\S]*?<!-- uppt:pr-notes:end -->\n*/
+
+/**
+ * Replace the marked notes block in a release PR body with `notes`, or
+ * remove it when `notes` is empty. A body without the block gets one
+ * appended only when `append` is set.
+ */
+export function setPrNotes (body: string, notes: string, append = false): string {
+  const block = notes && `${PR_NOTES_START}\n${notes}\n${PR_NOTES_END}`
+  if (!PR_NOTES_RE.test(body)) return append && block ? `${body}\n\n${block}` : body
+  return body.replace(PR_NOTES_RE, (match: string, offset: number) => {
+    const before = offset > 0 ? '\n\n' : ''
+    const after = offset + match.length < body.length ? '\n\n' : ''
+    if (block) return before + block + after
+    return before && after ? '\n\n' : ''
+  })
+}
+
+/** Remove the marked notes block from a release PR body. */
+export function stripPrNotes (body: string): string {
+  return setPrNotes(body, '')
+}
+
+function prNotes (baseBranch: string): string {
+  return (process.env.PR_NOTES ?? '').trim().replaceAll('{base}', baseBranch)
+}
+
 function bumpBetween (from: string, to: string): BumpLevel {
   const core = (v: string) => v.split(/[-+]/)[0]!.split('.').map(Number)
   const [a, b] = [core(from), core(to)]
@@ -1248,72 +1276,6 @@ function renderTitle (template: string, vars: Record<string, string>): string {
   })
 }
 
-/**
- * The maintainer can set a different preamble for each base branch, or a
- * `default` entry to use when no branch-specific entry exists. If the
- * value is not valid JSON, it is used verbatim for all branches.
- * ```yaml
- * with:
- *   pr-preamble: |
- *     {
- *       "main": "📦 [View pkg-pr-new for main](...)",
- *       "v3.x": "📦 [View pkg-pr-new for v3.x](...)",
- *       "default": "📦 Test the latest changes"
- *     }
- * ```
- * @param baseBranch The base branch of the preamble to resolve.
- * @return The preamble for the given base branch, or `undefined` if none is set.
- */
-export function resolvePrPreamble(baseBranch: string): string | undefined {
-  const envPreamble = process.env.PR_PREAMBLE?.trim()
-  if (!envPreamble) {
-    return undefined
-  }
-
-  try {
-    const parsed = JSON.parse(envPreamble)
-    if (typeof parsed === 'object' && parsed !== null) {
-      const pick = (key: string): string | undefined => {
-        if (!Object.prototype.hasOwnProperty.call(parsed, key)) {
-          return undefined
-        }
-        const value = (parsed as Record<string, unknown>)[key]
-        return typeof value === 'string' && value.trim().length > 0 ? value : undefined
-      }
-      return pick(baseBranch) ?? pick('default')
-    }
-  } catch {
-    return envPreamble
-  }
-
-  return envPreamble
-}
-
-/** PR preamble markers */
-export const PR_PREAMBLE_MARKERS = {
-  init: '<!-- uppt:pr-preamble:start -->',
-  end: '<!-- uppt:pr-preamble:end -->',
-} as const
-
-/** Create the PR preamble for a given base branch and intro. */
-export function createPrPreamble(baseBranch: string, intro: string): string {
-  const preamble = resolvePrPreamble(baseBranch)
-  return preamble
-    ? `${intro}\n>\n${TIMETABLE_PLACEHOLDER}\n\n${PR_PREAMBLE_MARKERS.init}\n${preamble}\n${PR_PREAMBLE_MARKERS.end}\n`
-    : `${intro}\n>\n${TIMETABLE_PLACEHOLDER}`
-}
-
-/** Remove the PR preamble and the markers from a PR body. */
-export function removePrPreamble(body: string): string {
-  const { init, end } = PR_PREAMBLE_MARKERS
-  const startIdx = body.indexOf(init)
-  const endIdx = body.indexOf(end, startIdx + init.length)
-  if (startIdx === -1 || endIdx === -1) {
-    return body
-  }
-  return (body.slice(0, startIdx) + body.slice(endIdx + end.length)).trimEnd()
-}
-
 export async function main () {
   const dryRun = Boolean(process.env.DRY_RUN)
   const repo = getRepo()
@@ -1451,10 +1413,13 @@ export async function main () {
 
   const currentPR = await findOpenPR(repo, releaseBranch)
   const intro = `> v${newVersion} is the next ${bump} release.`
-
-  const preamble = (extractPreamble(currentPR?.body) || seedPreamble)
+  const existingPreamble = (extractPreamble(currentPR?.body) || seedPreamble)
     ?.replace(/^> v\S+ is the next (?:major|minor|patch) release\.$/m, intro)
-    || createPrPreamble(baseBranch, intro)
+  const preamble = setPrNotes(
+    existingPreamble || `${intro}\n>\n${TIMETABLE_PLACEHOLDER}`,
+    prNotes(baseBranch),
+    !existingPreamble,
+  )
 
   const body = [
     preamble,
@@ -1591,13 +1556,12 @@ async function runIndependent (packagesInput: string): Promise<void> {
   const contributors = await getContributors(uniqueCommits, repo, cutoff)
 
   const currentPR = await findOpenPR(repo, releaseBranch)
-
-  const preamble = extractPreamble(currentPR?.body)
-    || seedPreamble
-    || createPrPreamble(
-      baseBranch,
-      '> The next set of package releases, covering all packages with unreleased changes.',
-    )
+  const existingPreamble = extractPreamble(currentPR?.body) || seedPreamble
+  const preamble = setPrNotes(
+    existingPreamble || `> The next set of package releases, covering all packages with unreleased changes.\n>\n${TIMETABLE_PLACEHOLDER}`,
+    prNotes(baseBranch),
+    !existingPreamble,
+  )
 
   const body = buildIndependentBody(plan, {
     owner: repo.owner,
