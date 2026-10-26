@@ -19,6 +19,7 @@ const ENV_KEYS = [
   'PRERELEASE',
   'MODE',
   'SCOPES',
+  'TITLE',
 ] as const
 
 interface FakeCommit {
@@ -64,7 +65,7 @@ const api = {
   prsForHead: [] as Array<{ head: { ref: string }, merged_at: string | null }>,
   logins: new Map<string, string | null>(),
   priorCommits: new Map<string, unknown[]>(),
-  compares: new Map<string, { files?: Array<{ filename: string }>, merge_base_commit: { sha: string }, behind_by: number }>(),
+  compares: new Map<string, { files?: Array<{ filename: string }>, commits?: Array<{ commit: { message: string } }>, merge_base_commit: { sha: string }, behind_by: number }>(),
   contents: new Map<string, string>(),
   rawContents: new Map<string, unknown>(),
   fail: new Map<string, number>(),
@@ -208,13 +209,14 @@ function prBody (): string {
   return (call?.body as { body: string }).body
 }
 
-function releaseBranch (ref: string, files: Record<string, string>, opts: { behindBy?: number, baseChanged?: string[], extra?: Array<{ filename: string }> } = {}) {
+function releaseBranch (ref: string, files: Record<string, string>, opts: { behindBy?: number, baseChanged?: string[], extra?: Array<{ filename: string }>, messages?: string[] } = {}) {
   api.branches.set(ref, 'bump-sha')
   for (const [path, content] of Object.entries(files)) api.contents.set(`${ref}:${path}`, content)
   api.compares.set(`main...${ref}`, {
     files: [...Object.keys(files).map(filename => ({ filename })), ...(opts.extra ?? [])],
     merge_base_commit: { sha: 'mb' },
     behind_by: opts.behindBy ?? 0,
+    commits: opts.messages?.map(message => ({ commit: { message } })),
   })
   if (opts.baseChanged) {
     api.compares.set('mb...main', { files: opts.baseChanged.map(filename => ({ filename })), merge_base_commit: { sha: 'mb' }, behind_by: 0 })
@@ -281,6 +283,41 @@ describe('lockstep main', () => {
     expect(prBody()).toContain('- add a thing (#7)')
     expect(prBody()).toContain('- Ada (@ada)')
     expect(prBody()).toContain('/compare/v1.2.3...v1.3.0)')
+  })
+
+  it('uses a custom title for the PR and the release commit', async () => {
+    process.env.TITLE = 'chore(release): v{version}'
+    await main()
+    const created = calls.find(c => c.method === 'POST' && c.path.endsWith('/pulls'))!
+    expect(created.body).toMatchObject({ title: 'chore(release): v1.3.0' })
+    const commit = calls.find(c => c.method === 'POST' && c.path === '/repos/owner/repo/git/commits')!
+    expect(commit.body).toMatchObject({ message: 'chore(release): v1.3.0' })
+  })
+
+  it('rebuilds a single-commit release branch whose message no longer matches the title', async () => {
+    process.env.TITLE = 'chore(release): v{version}'
+    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.3.0') }, { messages: ['v1.3.0'] })
+    await main()
+    const commit = calls.find(c => c.method === 'POST' && c.path === '/repos/owner/repo/git/commits')!
+    expect(commit.body).toMatchObject({ message: 'chore(release): v1.3.0' })
+    expect(calls).toContainEqual(expect.objectContaining({ method: 'PATCH', path: '/repos/owner/repo/git/refs/heads/release/v1.3.0', body: { sha: 'commit-sha', force: true } }))
+  })
+
+  it('leaves a single-commit release branch alone when its message matches the title', async () => {
+    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.3.0') }, { messages: ['v1.3.0'] })
+    await main()
+    expect(calls.some(c => c.path.endsWith('/git/trees'))).toBe(false)
+  })
+
+  it('rejects a placeholder with non-word characters', async () => {
+    process.env.TITLE = 'release {version-name}'
+    await expect(main()).rejects.toThrow('Unknown placeholder `{version-name}` in the `title` input; expected `{version}`.')
+  })
+
+  it('rejects an unknown title placeholder before writing anything', async () => {
+    process.env.TITLE = 'release {count} {packages}'
+    await expect(main()).rejects.toThrow('Unknown placeholder `{count}` in the `title` input; expected `{version}`.')
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([])
   })
 
   it('omits commits already released on the diverged branch', async () => {
@@ -975,6 +1012,21 @@ describe('independent main', () => {
     await main()
     const created = calls.find(c => c.method === 'POST' && c.path.endsWith('/pulls'))!
     expect(created.body).toMatchObject({ title: 'chore: release 1 package' })
+  })
+
+  it('uses a custom title for the PR and the release commit', async () => {
+    process.env.TITLE = 'chore(release): {count} {packages}'
+    await main()
+    const created = calls.find(c => c.method === 'POST' && c.path.endsWith('/pulls'))!
+    expect(created.body).toMatchObject({ title: 'chore(release): 2 packages' })
+    const commit = calls.find(c => c.method === 'POST' && c.path === '/repos/owner/repo/git/commits')!
+    expect(commit.body).toMatchObject({ message: 'chore(release): 2 packages' })
+  })
+
+  it('rejects a lockstep-only title placeholder', async () => {
+    process.env.TITLE = 'v{version}'
+    await expect(main()).rejects.toThrow('Unknown placeholder `{version}` in the `title` input; expected `{count}`, `{packages}`.')
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([])
   })
 
   it('makes no writes in dry-run mode', async () => {

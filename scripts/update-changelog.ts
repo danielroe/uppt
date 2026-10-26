@@ -25,6 +25,9 @@
 //   SCOPES             newline-separated "<package-name>: <scope> ..."
 //                      overrides for routing commit scopes to workspaces
 //                      in independent mode
+//   TITLE              release PR title and commit message template, with
+//                      `{version}` in lockstep mode and `{count}` /
+//                      `{packages}` in independent mode
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
@@ -788,6 +791,8 @@ export interface BranchDivergence {
   changed: Set<string>
   mergeBase: string
   behindBy: number
+  /** Messages of the commits the branch has on top of its merge base. */
+  commitMessages?: string[]
 }
 
 /**
@@ -811,6 +816,8 @@ export function releaseBranchDrift (opts: {
   keepOtherChanges?: boolean
   /** Defaults to exact equality. */
   isCurrent?: (branch: string | null, desired: string) => boolean
+  /** Desired message for a branch made of a single commit. */
+  message?: string
 }): string | null {
   if (!opts.divergence) return 'branch does not exist'
 
@@ -827,6 +834,11 @@ export function releaseBranchDrift (opts: {
   }
 
   if (opts.baseTouched.length) return `base has since changed ${opts.baseTouched.join(', ')}`
+
+  const messages = opts.divergence.commitMessages
+  if (opts.message !== undefined && messages?.length === 1 && messages[0] !== opts.message) {
+    return 'commit message differs from the plan'
+  }
 
   return null
 }
@@ -861,13 +873,14 @@ async function syncReleaseBranch (
 
   let divergence: BranchDivergence | null = null
   try {
-    const cmp = await gh<{ files?: Array<{ filename: string }>, merge_base_commit: { sha: string }, behind_by: number }>(
+    const cmp = await gh<{ files?: Array<{ filename: string }>, commits?: Array<{ commit: { message: string } }>, merge_base_commit: { sha: string }, behind_by: number }>(
       `/repos/${repo.owner}/${repo.repo}/compare/${encodeURIComponent(opts.base)}...${encodeURIComponent(opts.branch)}`,
     )
     divergence = {
       changed: new Set((cmp.files ?? []).map(file => file.filename)),
       mergeBase: cmp.merge_base_commit.sha,
       behindBy: cmp.behind_by,
+      commitMessages: cmp.commits?.map(c => c.commit.message),
     }
   } catch (err) {
     if (!(err instanceof Error) || !/-> 404\b/.test(err.message)) throw err
@@ -896,6 +909,7 @@ async function syncReleaseBranch (
     baseTouched,
     keepOtherChanges: opts.keepOtherChanges,
     isCurrent: opts.isCurrent,
+    message: opts.message,
   })
   if (!drift) {
     console.log(`Branch ${opts.branch} already carries the release plan; leaving it untouched.`)
@@ -1235,6 +1249,16 @@ export function buildIndependentBody (
   return lines.join('\n').trimEnd()
 }
 
+function renderTitle (template: string, vars: Record<string, string>): string {
+  return template.replace(/\{([^{}]*)\}/g, (match, key: string) => {
+    if (!Object.hasOwn(vars, key)) {
+      const known = Object.keys(vars).map(k => `\`{${k}}\``).join(', ')
+      throw new Error(`Unknown placeholder \`${match}\` in the \`title\` input; expected ${known}.`)
+    }
+    return vars[key]!
+  })
+}
+
 export async function main () {
   const dryRun = Boolean(process.env.DRY_RUN)
   const repo = getRepo()
@@ -1308,6 +1332,7 @@ export async function main () {
   }
 
   const newVersion = pinned?.version ?? computedVersion
+  const title = renderTitle(process.env.TITLE?.trim() || 'v{version}', { version: newVersion })
   const bump = pinned ? bumpBetween(currentVersion, newVersion) : determineBump(commits)
   const releaseBranch = pinned?.pr.head ?? `release/v${newVersion}`
 
@@ -1345,7 +1370,7 @@ export async function main () {
     const synced = await syncReleaseBranch(repo, {
       base: baseBranch,
       branch: releaseBranch,
-      message: `v${newVersion}`,
+      message: title,
       files: buildBumpFileSet({ monorepo, workspaces, rootPkg, rootPkgSource, currentVersion, newVersion }),
       keepOtherChanges: true,
       isCurrent: (branch, desired) => sameManifest(branch, desired),
@@ -1403,7 +1428,7 @@ export async function main () {
     return
   }
 
-  await upsertReleasePR(repo, { currentPR, title: `v${newVersion}`, head: releaseBranch, base: baseBranch, body })
+  await upsertReleasePR(repo, { currentPR, title, head: releaseBranch, base: baseBranch, body })
 }
 
 async function runIndependent (packagesInput: string): Promise<void> {
@@ -1474,7 +1499,10 @@ async function runIndependent (packagesInput: string): Promise<void> {
   const repo = getRepo()
   const baseBranch = getCurrentBranch()
   const releaseBranch = `release/${baseBranch}-pending`
-  const title = `chore: release ${plan.releases.length} package${plan.releases.length === 1 ? '' : 's'}`
+  const title = renderTitle(process.env.TITLE?.trim() || 'chore: release {count} {packages}', {
+    count: String(plan.releases.length),
+    packages: plan.releases.length === 1 ? 'package' : 'packages',
+  })
 
   console.log(`Base branch: ${baseBranch}`)
   console.log(`Release branch: ${releaseBranch}`)
