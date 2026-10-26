@@ -24,7 +24,11 @@ describe('parseDistTags', () => {
     expect(parseDistTags('  ', 'npm-tag')).toEqual([])
   })
 
-  it.each(['-bad', 'a/b', '1.2.3'])('rejects %s', (tag) => {
+  it.each(['4x', '3x-latest', 'pr-123', 'next'])('accepts %s', (tag) => {
+    expect(parseDistTags(tag, 'npm-tag')).toEqual([tag])
+  })
+
+  it.each(['-bad', 'a/b', '1.2.3', '1.2.3-beta.0', '4', '4.6', '4.x', 'v4', 'vv4', 'x'])('rejects %s', (tag) => {
     expect(() => parseDistTags(`latest ${tag}`, 'npm-tag')).toThrow(`npm-tag is not a valid dist-tag: ${JSON.stringify(tag)}`)
   })
 })

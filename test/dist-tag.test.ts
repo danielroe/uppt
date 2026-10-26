@@ -26,12 +26,11 @@ beforeEach(() => {
   spawnSync.mockImplementation((_cmd: string, args: string[]) => {
     const [spec] = args.slice(1)
     const remaining = live.get(spec!)
-    if (remaining === undefined) return { status: 1, stdout: '' }
-    if (remaining > 0) {
-      live.set(spec!, remaining - 1)
-      return { status: 0, stdout: '' }
+    if (remaining === undefined || remaining > 0) {
+      if (remaining) live.set(spec!, remaining - 1)
+      return { status: 1, stdout: '', stderr: `npm error code E404\nnpm error 404 No match found for version ${spec}\n` }
     }
-    return { status: 0, stdout: `${spec!.slice(spec!.lastIndexOf('@') + 1)}\n` }
+    return { status: 0, stdout: `${spec!.slice(spec!.lastIndexOf('@') + 1)}\n`, stderr: '' }
   })
   execFileSync.mockImplementation((_cmd: string, args: string[]) => args[1] === 'ls' ? 'latest: 4.1.0\n4x: 4.0.0\n' : '')
   vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -82,6 +81,22 @@ describe('dist-tag', () => {
     process.env.TIMEOUT_MINUTES = '0'
     await expect(main(sleep)).rejects.toThrow(/Timed out after 0 minute\(s\) waiting for a@4\.1\.0, @scope\/b@4\.1\.0/)
     expect(sleep).not.toHaveBeenCalled()
+  })
+
+  it('fails straight away when npm view fails for another reason', async () => {
+    spawnSync.mockReturnValueOnce({ status: 1, stdout: '', stderr: 'npm error code E401\n' })
+    await expect(main(sleep)).rejects.toThrow('npm view a@4.1.0 failed (exit 1):\nnpm error code E401\n')
+    expect(sleep).not.toHaveBeenCalled()
+  })
+
+  it('fails when npm view is killed', async () => {
+    spawnSync.mockReturnValueOnce({ status: null, signal: 'SIGTERM', stdout: '', stderr: '' })
+    await expect(main(sleep)).rejects.toThrow('npm view a@4.1.0 failed (exit SIGTERM):')
+  })
+
+  it('fails when npm cannot be spawned', async () => {
+    spawnSync.mockReturnValueOnce({ status: null, error: new Error('spawn npm ENOENT') })
+    await expect(main(sleep)).rejects.toThrow('spawn npm ENOENT')
   })
 
   it.each(['-1', 'soon'])('rejects TIMEOUT_MINUTES=%s', async (value) => {

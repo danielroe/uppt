@@ -198,7 +198,7 @@ export function compareSemver (a: string, b: string): number {
     const [x, y] = [pa.pre[i]!, pb.pre[i]!]
     if (x === y) continue
     const [nx, ny] = [/^\d+$/.test(x), /^\d+$/.test(y)]
-    if (nx && ny) return Number(x) - Number(y)
+    if (nx && ny) return x.length - y.length || (x < y ? -1 : 1)
     if (nx !== ny) return nx ? -1 : 1
     return x < y ? -1 : 1
   }

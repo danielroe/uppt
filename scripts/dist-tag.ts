@@ -22,7 +22,10 @@ const POLL_SECONDS = 30
 
 function isLive ({ name, version }: DistTagEntry): boolean {
   const result = spawnSync('npm', ['view', `${name}@${version}`, 'version', '--prefer-online'], { encoding: 'utf8' })
-  return result.status === 0 && result.stdout.trim() === version
+  if (result.error) throw result.error
+  if (result.status === 0) return true
+  if (/\bE404\b/.test(result.stderr)) return false
+  throw new Error(`npm view ${name}@${version} failed (exit ${result.status ?? result.signal}):\n${result.stderr}`)
 }
 
 function label (entries: DistTagEntry[]): string {

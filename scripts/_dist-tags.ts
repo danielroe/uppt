@@ -7,6 +7,8 @@ import { isValidPackageName } from './_independent.ts'
 import { compareSemver, isSemver } from './_workspaces.ts'
 
 const DIST_TAG_RE = /^[a-z0-9][\w.-]*$/i
+// npm refuses tags that parse as a semver range (`4`, `4.x`, `v4`, `1.2.3`).
+const SEMVER_RANGE_RE = /^v*(?:0|[1-9]\d*|x)(?:\.(?:0|[1-9]\d*|x)(?:\.(?:0|[1-9]\d*|x)(?:-(?:0|[1-9]\d*|\d*[a-z-][\da-z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-z-][\da-z-]*))*)?)?)?$/i
 
 /** A published (or staged) version and the extra dist-tags to point at it. */
 export interface DistTagEntry {
@@ -24,7 +26,7 @@ export interface DistTagEntry {
 export function parseDistTags (raw: string | undefined, label: string): string[] {
   const tags = [...new Set((raw ?? '').split(/[\s,]+/).filter(Boolean))]
   for (const tag of tags) {
-    if (!DIST_TAG_RE.test(tag) || isSemver(tag)) {
+    if (!DIST_TAG_RE.test(tag) || SEMVER_RANGE_RE.test(tag)) {
       throw new Error(`${label} is not a valid dist-tag: ${JSON.stringify(tag)}`)
     }
   }
