@@ -12,11 +12,11 @@ A useful report includes: the affected version (commit SHA or tag), the conditio
 
 ## Scope
 
-uppt is a release tool. Its three subactions run with elevated permissions in the caller's workflow: `contents: write` and `pull-requests: write` for `uppt/pr`, `contents: write` and `actions: write` for `uppt/release`, and an npm OIDC token (`id-token: write`) for `uppt/publish`. The npm OIDC token is the highest-value secret in scope.
+uppt is a release tool. Its subactions run with elevated permissions in the caller's workflow: `contents: write` and `pull-requests: write` for `uppt/pr`, `contents: write` and `actions: write` for `uppt/release`, and an npm OIDC token (`id-token: write`) for `uppt/publish` and `uppt/dist-tag`. The npm OIDC token is the highest-value secret in scope.
 
 In scope:
 
-- Anything that lets a non-maintainer (including a fork-PR author) cause uppt to tag, release, publish, or commit on their behalf.
+- Anything that lets a non-maintainer (including a fork-PR author) cause uppt to tag, release, publish, move a dist-tag, or commit on their behalf.
 - Anything that lets uppt publish an attacker-chosen version, an attacker-chosen tarball, or attacker-chosen content under a tag.
 - Exfiltration of `GITHUB_TOKEN`, npm OIDC tokens, or any other secret reaching a uppt step.
 - Bypasses of the input validation in `scripts/` (semver pinning, ref-shape checks, event-name guards).

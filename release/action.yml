@@ -32,7 +32,7 @@ inputs:
     required: false
     default: 'lockstep'
   npm-tag:
-    description: 'npm dist-tag override, passed to the publish workflow as an `npm-tag` input. Only needed when a maintenance line does not use the derived `<major>x` tag (e.g. `legacy`), or when the release spans majors. A release merged into a branch other than the default one derives `<major>x` on its own and is not marked as the repository''s latest release.'
+    description: 'npm dist-tag override, passed to the publish workflow as an `npm-tag` input. Only needed when a maintenance line does not use the derived `<major>x` tag (e.g. `legacy`), or when the release spans majors. A release merged into a branch other than the default one derives `<major>x` on its own and is not marked as the repository''s latest release. Accepts a list (`latest 4x`) to publish to several dist-tags; the first decides whether the release is marked latest.'
     required: false
     default: ''
   allow-forks:

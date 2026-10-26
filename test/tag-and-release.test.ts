@@ -153,7 +153,22 @@ describe('tag-and-release', () => {
     expect(ghCalls().at(-1)).toEqual(['workflow', 'run', 'release.yml', '--ref', 'v1.2.3', '-f', 'npm-tag=legacy'])
   })
 
-  it.each(['-bad', 'has space', '1.2.3'])('rejects an invalid npm-tag (%s)', (tag) => {
+  it('passes a list of dist-tags through, taking latest from the first', () => {
+    process.env.BASE_BRANCH = '1.x'
+    process.env.DEFAULT_BRANCH = 'main'
+    process.env.NPM_TAG = 'latest, 1x'
+    main()
+    expect(ghCalls().at(-2)).toContain('--latest')
+    expect(ghCalls().at(-1)).toEqual(['workflow', 'run', 'release.yml', '--ref', 'v1.2.3', '-f', 'npm-tag=latest 1x'])
+  })
+
+  it('does not take latest when it is not the first dist-tag', () => {
+    process.env.NPM_TAG = '1x latest'
+    main()
+    expect(ghCalls().at(-2)).toContain('--latest=false')
+  })
+
+  it.each(['-bad', 'a/b', '1.2.3', 'latest 1.2.3'])('rejects an invalid npm-tag (%s)', (tag) => {
     process.env.NPM_TAG = tag
     expect(() => main()).toThrow(/is not a valid dist-tag/)
   })

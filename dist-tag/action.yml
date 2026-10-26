@@ -1,0 +1,55 @@
+name: 'uppt/dist-tag'
+description: 'Point extra npm dist-tags at staged versions once they are approved, using OIDC trusted publishing.'
+author: 'Daniel Roe'
+
+branding:
+  icon: 'bookmark'
+  color: 'black'
+
+inputs:
+  node-version:
+    description: 'Node version for the scripts and for `npm dist-tag`. Needs `--experimental-strip-types` support (22.6+, 24+ recommended).'
+    required: false
+    default: '24'
+  dist-tags:
+    description: 'The `dist-tags` output of `uppt/publish`: a JSON array of `{ name, version, tags }`.'
+    required: true
+  timeout-minutes:
+    description: 'How long to wait for the staged versions to be approved on npmjs.com before failing. Re-run the job to resume waiting.'
+    required: false
+    default: '30'
+
+runs:
+  using: composite
+  steps:
+    - name: Validate event
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+      run: |
+        set -euo pipefail
+        case "$EVENT_NAME" in
+          push|workflow_dispatch) ;;
+          *)
+            echo "::error::danielroe/uppt/dist-tag only supports 'push' and 'workflow_dispatch' events, got '$EVENT_NAME'."
+            exit 1
+            ;;
+        esac
+
+    - name: Setup Node
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        registry-url: 'https://registry.npmjs.org'
+        package-manager-cache: false
+
+    - name: Update npm
+      shell: bash
+      run: npm install -g npm@latest
+
+    - name: Apply dist-tags
+      shell: bash
+      env:
+        DIST_TAGS: ${{ inputs.dist-tags }}
+        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+      run: node --experimental-strip-types ${{ github.action_path }}/../scripts/dist-tag.ts

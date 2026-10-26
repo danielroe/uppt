@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   buildScopeMap,
+  compareSemver,
   expandPackagePatterns,
   isSemver,
   lockstepVersionFromWorkspaces,
@@ -23,6 +24,26 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true })
+})
+
+describe('compareSemver', () => {
+  it.each([
+    ['1.0.0', '1.0.0', 0],
+    ['1.0.0+build.1', '1.0.0', 0],
+    ['1.0.1', '1.0.0', 1],
+    ['1.1.0', '1.2.0', -1],
+    ['2.0.0', '10.0.0', -1],
+    ['1.0.0', '1.0.0-rc.1', 1],
+    ['1.0.0-rc.1', '1.0.0', -1],
+    ['1.0.0-beta.2', '1.0.0-beta.10', -1],
+    ['1.0.0-beta', '1.0.0-alpha', 1],
+    ['1.0.0-1', '1.0.0-alpha', -1],
+    ['1.0.0-alpha', '1.0.0-1', 1],
+    ['1.0.0-alpha.1', '1.0.0-alpha', 1],
+    ['4.6.2-2610261637-c655a32', '4.6.2-2610251200-0123456', 1],
+  ])('compares %s with %s', (a, b, expected) => {
+    expect(Math.sign(compareSemver(a, b))).toBe(expected)
+  })
 })
 
 function writePackage (relDir: string, contents: Record<string, unknown>) {

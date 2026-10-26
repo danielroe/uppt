@@ -16,7 +16,7 @@ inputs:
     required: false
     default: 'public'
   npm-tag:
-    description: 'Optional npm dist-tag override applied to every tarball. By default the tag is derived from each tarball''s version: stable versions publish to `latest`, prereleases to their identifier (`5.0.0-beta.0` → `beta`, `5.0.0-rc.1` → `rc`), and prereleases with a bare numeric identifier (`5.0.0-0`) to `next`. Required when a tarball filename carries no parseable version, since uppt refuses to guess.'
+    description: 'Optional npm dist-tag override applied to every tarball. By default the tag is derived from each tarball''s version: stable versions publish to `latest`, prereleases to their identifier (`5.0.0-beta.0` → `beta`, `5.0.0-rc.1` → `rc`), and prereleases with a bare numeric identifier (`5.0.0-0`) to `next`. Required when a tarball filename carries no parseable version, since uppt refuses to guess. A whitespace- or comma-separated list (`latest 4x`) publishes to the first tag and also points the rest at the new version, unless they already point at a newer one: straight after publishing for nightlies, or via `uppt/dist-tag` once a staged version is approved. Extra tags need `Allow npm dist-tag` on the trusted publisher.'
     required: false
     default: ''
   files:
@@ -31,6 +31,11 @@ inputs:
     description: 'Set to `true` to publish nightly builds packed by `uppt/pack` with `nightly: true`. Runs `npm publish` instead of `npm stage publish` (no approval step), expects a `refs/heads/*` ref, and defaults the dist-tag to `latest`.'
     required: false
     default: 'false'
+
+outputs:
+  dist-tags:
+    description: 'JSON array of `{ name, version, tags }` for staged versions that still need the extra dist-tags from `npm-tag` (`[]` when there are none). Pass to `uppt/dist-tag` via its `dist-tags` input.'
+    value: ${{ steps.publish.outputs.dist-tags }}
 
 runs:
   using: composite
@@ -87,6 +92,7 @@ runs:
         path: ${{ runner.temp }}/uppt-tarballs
 
     - name: Publish to npm
+      id: publish
       shell: bash
       env:
         NPM_ACCESS: ${{ inputs.npm-access }}

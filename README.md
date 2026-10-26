@@ -178,7 +178,7 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | `token` | `${{ github.token }}` | Needs `contents: write` and `actions: write`. |
 | `publish-workflow` | `release.yml` | Workflow filename to dispatch after tagging. Must declare `workflow_dispatch`. |
 | `mode` | `lockstep` | `lockstep` or `independent`. Must match `uppt/pr`. See [Independent versioning](#independent-versioning-experimental). |
-| `npm-tag` | _(derived)_ | npm dist-tag override, passed on to the publish workflow. Derived as `<major>x` for a release merged into a non-default branch. See [Maintenance releases](#maintenance-releases). |
+| `npm-tag` | _(derived)_ | npm dist-tag override, passed on to the publish workflow. Derived as `<major>x` for a release merged into a non-default branch. Accepts a list (`latest 4x`). See [Maintenance releases](#maintenance-releases) and [Multiple dist-tags](#multiple-dist-tags). |
 | `allow-forks` | `false` | By default the action skips on forks so they don't tag or publish releases of their own. |
 </details>
 
@@ -205,10 +205,23 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | Input | Default | Description |
 | --- | --- | --- |
 | `npm-access` | `public` | npm access level (`public` or `restricted`). |
-| `npm-tag` | _(derived)_ | npm dist-tag override for every tarball. By default stable versions publish to `latest`, prereleases to their identifier (`5.0.0-beta.0` → `beta`), bare-numeric prereleases (`5.0.0-0`) to `next`, and maintenance releases to `<major>x` (see [Maintenance releases](#maintenance-releases)). |
+| `npm-tag` | _(derived)_ | npm dist-tag override for every tarball. By default stable versions publish to `latest`, prereleases to their identifier (`5.0.0-beta.0` → `beta`), bare-numeric prereleases (`5.0.0-0`) to `next`, and maintenance releases to `<major>x` (see [Maintenance releases](#maintenance-releases)). Accepts a list (`latest 4x`); see [Multiple dist-tags](#multiple-dist-tags). |
 | `files` | _(scan artifact)_ | JSON array of tarball filenames, as emitted by `uppt/pack`. When omitted, every `*.tgz` in the artifact is published. |
 | `releases` | _(unset)_ | Independent-mode publish payload. Never set by hand. |
 | `nightly` | `false` | Publish nightly builds with `npm publish` instead of staging them. See [Nightly releases](#nightly-releases). |
+
+| Output | Description |
+| --- | --- |
+| `dist-tags` | JSON array of staged versions that still need the extra tags from `npm-tag` (`[]` when there are none). Pass to `uppt/dist-tag` via its `dist-tags` input. |
+</details>
+
+<details>
+<summary><code>uppt/dist-tag</code></summary>
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `dist-tags` | _(required)_ | The `dist-tags` output of `uppt/publish`. |
+| `timeout-minutes` | `30` | How long to wait for you to approve the staged versions on npmjs.com before failing. Re-run the job to wait again. |
 </details>
 
 ## Lifecycle scripts
@@ -246,6 +259,52 @@ If your line uses a different dist-tag (`legacy`, `v3-latest`), or the release s
 ```
 
 It overrides the derivation, applies to every tarball in the run, and any value other than `latest` also keeps the GitHub release out of the "Latest" slot.
+
+## Multiple dist-tags
+
+`npm-tag` also accepts a list of tags, separated by spaces or commas. uppt publishes to the first tag, then points each of the others at the new version unless that tag already points at a newer one. A rerun, or a release from an older line, doesn't move a tag backwards.
+
+For example, while a `4.x` maintenance branch is still your newest stable line, publish it to `latest` and keep `4x` in step:
+
+```yaml
+- uses: danielroe/uppt/release@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
+  with:
+    npm-tag: ${{ github.event.pull_request.base.ref == '4.x' && 'latest 4x' || '' }}
+```
+
+The extra tags are set with `npm dist-tag` over OIDC, which requires npm 11.21.0 or later (uppt installs the latest npm). On npmjs.com, enable **Allow npm dist-tag** on the trusted publisher the job uses. It's off by default, and permission to publish doesn't include it. With it enabled, the workflow can point the package's tags at any published version without 2FA, so keep the GitHub environment restricted to the refs you release from.
+
+A staged version carries only its first tag until you approve it. To apply the rest, add a `dist-tag` job after `publish`. It checks npm every 30 seconds until each version is live, tags it, and fails after `timeout-minutes` (default `30`) if a version is still waiting for approval. Re-run the job once you've approved it.
+
+```yaml
+  publish:
+    # ...as in the starter workflow, plus:
+    outputs:
+      dist-tags: ${{ steps.publish.outputs.dist-tags }}
+    steps:
+      - id: publish
+        uses: danielroe/uppt/publish@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
+        with:
+          files: ${{ needs.pack.outputs.files }}
+          npm-tag: ${{ inputs.npm-tag }}
+
+  # once the staged versions are approved, point the remaining dist-tags at them
+  dist-tag:
+    if: needs.publish.outputs.dist-tags != '[]'
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    environment: npm
+    steps:
+      - uses: danielroe/uppt/dist-tag@6ec27140623aa835e362f866d8ab0018ab057f4d # v0.6.11
+        with:
+          dist-tags: ${{ needs.publish.outputs.dist-tags }}
+```
+
+If the `npm` environment requires reviewers, this job also waits for review. Approve it after you've approved the staged versions on npmjs.com; a job waiting for review doesn't occupy a runner.
+
+Nightlies publish directly, so `uppt/publish` applies their extra tags in the same step and no `dist-tag` job is needed.
 
 ## Nightly releases
 
@@ -315,7 +374,7 @@ jobs:
       @nuxt/cli: @nuxt/cli-nightly@5x
 ```
 
-A bare name aliases to `npm:<name>-nightly@latest`. Nightlies publish to the `latest` dist-tag of the nightly package; set `npm-tag` on `uppt/publish` to publish a branch to another tag (`5x`).
+A bare name aliases to `npm:<name>-nightly@latest`. Nightlies publish to the `latest` dist-tag of the nightly package; set `npm-tag` on `uppt/publish` to publish a branch to another tag (`5x`), or to several (`4x latest`, see [Multiple dist-tags](#multiple-dist-tags)).
 
 ## Monorepo support
 

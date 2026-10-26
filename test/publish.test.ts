@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import process from 'node:process'
@@ -24,7 +24,7 @@ let env: NodeJS.ProcessEnv
 
 beforeEach(() => {
   env = { ...process.env }
-  for (const key of ['NPM_ACCESS', 'NPM_TAG', 'TARBALL_DIR', 'TARBALL_FILES', 'RELEASES', 'NIGHTLY']) delete process.env[key]
+  for (const key of ['NPM_ACCESS', 'NPM_TAG', 'TARBALL_DIR', 'TARBALL_FILES', 'RELEASES', 'NIGHTLY', 'GITHUB_OUTPUT']) delete process.env[key]
   vi.spyOn(console, 'log').mockImplementation(() => {})
   spawnSync.mockReturnValue({ status: 0, stderr: '' })
 })
@@ -214,7 +214,61 @@ describe('publish', () => {
     expect(npmArgs().map(args => args.at(-1))).toEqual(['--tag=legacy', '--tag=legacy'])
   })
 
-  it.each(['-bad', 'has space', '1.2.3'])('rejects an invalid NPM_TAG (%s)', (tag) => {
+  describe('with several dist-tags', () => {
+    let output: string
+
+    beforeEach(() => {
+      output = resolve(mkdtempSync(resolve(tmpdir(), 'uppt-output-')), 'out')
+      writeFileSync(output, '')
+      process.env.GITHUB_OUTPUT = output
+      execFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'tar') return JSON.stringify({ name: args[1]!.includes('/b-') ? '@scope/b' : 'a', version: versionFromTarballName(args[1]!) })
+        if (args[1] === 'ls') return 'latest: 1.0.0\n4x: 4.0.0\n'
+        return ''
+      })
+    })
+
+    it('stages under the first tag and hands the rest to uppt/dist-tag', () => {
+      process.env.TARBALL_DIR = fixture(['a-4.1.0.tgz', 'b-4.1.0.tgz'])
+      process.env.NPM_TAG = 'latest 4x'
+      main()
+      expect(npmArgs().filter(args => args[0] === 'stage').map(args => args.at(-1))).toEqual(['--tag=latest', '--tag=latest'])
+      expect(npmArgs().some(args => args[0] === 'dist-tag')).toBe(false)
+      expect(readFileSync(output, 'utf8')).toBe(`dist-tags=${JSON.stringify([
+        { name: 'a', version: '4.1.0', tags: ['4x'] },
+        { name: '@scope/b', version: '4.1.0', tags: ['4x'] },
+      ])}\n`)
+    })
+
+    it('adds the remaining tags straight after a nightly publish', () => {
+      process.env.NIGHTLY = 'true'
+      process.env.TARBALL_DIR = fixture(['a-nightly-4.1.0-2605140905-0123456.tgz'])
+      process.env.NPM_TAG = '4x,latest'
+      main()
+      expect(npmArgs()).toContainEqual(['dist-tag', 'add', 'a@4.1.0-2605140905-0123456', 'latest'])
+      expect(spawnSync.mock.calls[0]![1]).toContain('--tag=4x')
+      expect(readFileSync(output, 'utf8')).toBe('dist-tags=[]\n')
+    })
+
+    it('still tags a nightly that npm rejects with E403', () => {
+      process.env.NIGHTLY = 'true'
+      process.env.TARBALL_DIR = fixture(['a-nightly-4.1.0-2605140905-0123456.tgz'])
+      process.env.NPM_TAG = '4x latest'
+      spawnSync.mockReturnValueOnce({ status: 1, stderr: 'npm error code E403\n' })
+      vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+      main()
+      expect(npmArgs()).toContainEqual(['dist-tag', 'add', 'a@4.1.0-2605140905-0123456', 'latest'])
+    })
+
+    it('writes an empty dist-tags output when there is a single tag', () => {
+      process.env.TARBALL_DIR = fixture(['a-4.1.0.tgz'])
+      main()
+      expect(readFileSync(output, 'utf8')).toBe('dist-tags=[]\n')
+      expect(execFileSync.mock.calls.some(([cmd]) => cmd === 'tar')).toBe(false)
+    })
+  })
+
+  it.each(['-bad', 'a/b', '1.2.3', 'latest 1.2.3'])('rejects an invalid NPM_TAG (%s)', (tag) => {
     process.env.TARBALL_DIR = fixture(['a-1.0.0.tgz'])
     process.env.NPM_TAG = tag
     expect(() => main()).toThrow(/NPM_TAG is not a valid dist-tag/)
