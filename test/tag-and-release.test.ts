@@ -101,6 +101,12 @@ describe('tag-and-release', () => {
     expect(ghCalls().at(-2)).toEqual(['release', 'create', 'v1.2.3', '--title', 'v1.2.3', '--notes', '> v1.2.3 is the next patch release.\n\n## 👉 Changelog'])
   })
 
+  it('drops the pr-notes block from the release notes', () => {
+    process.env.PR_BODY = '> v1.2.3 is the next patch release.\n>\n> **Timetable**: to be announced.\n\n<!-- uppt:pr-notes:start -->\npreview links\n<!-- uppt:pr-notes:end -->\n\n## 👉 Changelog'
+    main()
+    expect(ghCalls().at(-2)).toEqual(['release', 'create', 'v1.2.3', '--title', 'v1.2.3', '--notes', '> v1.2.3 is the next patch release.\n\n## 👉 Changelog'])
+  })
+
   it('dispatches a custom publish workflow', () => {
     process.env.PUBLISH_WORKFLOW = 'publish.yml'
     main()

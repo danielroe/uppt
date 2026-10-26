@@ -28,6 +28,9 @@
 //   TITLE              release PR title and commit message template, with
 //                      `{version}` in lockstep mode and `{count}` /
 //                      `{packages}` in independent mode
+//   PR_NOTES           Markdown kept in a marked block of the release PR
+//                      preamble and refreshed on every run, with `{base}`
+//                      and, in lockstep mode, `{version}`
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
@@ -1077,6 +1080,36 @@ export function stripPlaceholderTimetable (body: string): string {
     .replaceAll(`\n${TIMETABLE_PLACEHOLDER}`, '')
 }
 
+const PR_NOTES_START = '<!-- uppt:pr-notes:start -->'
+const PR_NOTES_END = '<!-- uppt:pr-notes:end -->'
+const PR_NOTES_RE = /\n*<!-- uppt:pr-notes:start -->[\s\S]*?<!-- uppt:pr-notes:end -->\n*/
+
+/**
+ * Replace the marked notes block in a release PR body with `notes`, or
+ * remove it when `notes` is empty. A body without the block gets one
+ * appended only when `append` is set.
+ */
+export function setPrNotes (body: string, notes: string, append = false): string {
+  const block = notes && `${PR_NOTES_START}\n${notes}\n${PR_NOTES_END}`
+  if (!PR_NOTES_RE.test(body)) return append && block ? `${body}\n\n${block}` : body
+  return body.replace(PR_NOTES_RE, (match: string, offset: number) => {
+    const before = offset > 0 ? '\n\n' : ''
+    const after = offset + match.length < body.length ? '\n\n' : ''
+    if (block) return before + block + after
+    return before && after ? '\n\n' : ''
+  })
+}
+
+/** Remove the marked notes block from a release PR body. */
+export function stripPrNotes (body: string): string {
+  return setPrNotes(body, '')
+}
+
+function prNotes (vars: { base: string, version?: string }): string {
+  return (process.env.PR_NOTES ?? '').replace(/^\s*\n/, '').trimEnd()
+    .replace(/\{(base|version)\}/g, (match, key: 'base' | 'version') => vars[key] ?? match)
+}
+
 function bumpBetween (from: string, to: string): BumpLevel {
   const core = (v: string) => v.split(/[-+]/)[0]!.split('.').map(Number)
   const [a, b] = [core(from), core(to)]
@@ -1381,9 +1414,14 @@ export async function main () {
 
   const currentPR = await findOpenPR(repo, releaseBranch)
   const intro = `> v${newVersion} is the next ${bump} release.`
-  const preamble = (extractPreamble(currentPR?.body) || seedPreamble)
+  const currentPreamble = extractPreamble(currentPR?.body)
+  const existingPreamble = (currentPreamble || seedPreamble)
     ?.replace(/^> v\S+ is the next (?:major|minor|patch) release\.$/m, intro)
-    || `${intro}\n>\n${TIMETABLE_PLACEHOLDER}`
+  const preamble = setPrNotes(
+    existingPreamble || `${intro}\n>\n${TIMETABLE_PLACEHOLDER}`,
+    prNotes({ base: baseBranch, version: newVersion }),
+    !currentPreamble,
+  )
 
   const body = [
     preamble,
@@ -1520,9 +1558,12 @@ async function runIndependent (packagesInput: string): Promise<void> {
   const contributors = await getContributors(uniqueCommits, repo, cutoff)
 
   const currentPR = await findOpenPR(repo, releaseBranch)
-  const preamble = extractPreamble(currentPR?.body)
-    || seedPreamble
-    || `> The next set of package releases, covering all packages with unreleased changes.\n>\n${TIMETABLE_PLACEHOLDER}`
+  const currentPreamble = extractPreamble(currentPR?.body)
+  const preamble = setPrNotes(
+    currentPreamble || seedPreamble || `> The next set of package releases, covering all packages with unreleased changes.\n>\n${TIMETABLE_PLACEHOLDER}`,
+    prNotes({ base: baseBranch }),
+    !currentPreamble,
+  )
 
   const body = buildIndependentBody(plan, {
     owner: repo.owner,

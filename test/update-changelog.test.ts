@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { resolvePinnedVersion, stripPlaceholderTimetable, TIMETABLE_PLACEHOLDER, buildBumpFileSet, dropRevertedCommits, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, truncateBody, dropAlreadyReleased, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
+import { resolvePinnedVersion, setPrNotes, stripPlaceholderTimetable, stripPrNotes, TIMETABLE_PLACEHOLDER, buildBumpFileSet, dropRevertedCommits, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, truncateBody, dropAlreadyReleased, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
 import { resolveWorkspaces } from '../scripts/_workspaces.ts'
 
 let tmp: string
@@ -524,6 +524,41 @@ describe('stripPlaceholderTimetable', () => {
   it('keeps an edited timetable', () => {
     const body = '> v1.2.0 is the next minor release.\n>\n> **Timetable**: Tuesday.\n\n## 👉 Changelog'
     expect(stripPlaceholderTimetable(body)).toBe(body)
+  })
+})
+
+describe('setPrNotes', () => {
+  const block = (notes: string) => `<!-- uppt:pr-notes:start -->\n${notes}\n<!-- uppt:pr-notes:end -->`
+
+  it('appends a block only when asked to', () => {
+    expect(setPrNotes('> intro', 'notes', true)).toBe(`> intro\n\n${block('notes')}`)
+    expect(setPrNotes('> intro', 'notes')).toBe('> intro')
+    expect(setPrNotes('> intro', '', true)).toBe('> intro')
+  })
+
+  it('replaces an existing block wherever it sits', () => {
+    expect(setPrNotes(`> intro\n\n${block('old')}\n\n> outro`, 'new')).toBe(`> intro\n\n${block('new')}\n\n> outro`)
+    expect(setPrNotes(`${block('old')}\n> outro`, 'new')).toBe(`${block('new')}\n\n> outro`)
+    expect(setPrNotes(`> intro\n${block('old')}`, 'new', true)).toBe(`> intro\n\n${block('new')}`)
+  })
+
+  it('keeps replacement patterns in the notes literal', () => {
+    expect(setPrNotes(block('old'), '$& $1')).toBe(block('$& $1'))
+  })
+})
+
+describe('stripPrNotes', () => {
+  const block = '<!-- uppt:pr-notes:start -->\nnotes\n<!-- uppt:pr-notes:end -->'
+
+  it('removes the block and the blank lines around it', () => {
+    expect(stripPrNotes(`> intro\n\n${block}\n\n## 👉 Changelog`)).toBe('> intro\n\n## 👉 Changelog')
+    expect(stripPrNotes(`${block}\n\n## 👉 Changelog`)).toBe('## 👉 Changelog')
+    expect(stripPrNotes(`> intro\n\n${block}`)).toBe('> intro')
+  })
+
+  it('leaves a body without a complete block alone', () => {
+    const body = '> intro\n\n<!-- uppt:pr-notes:start -->\nnotes\n\n## 👉 Changelog'
+    expect(stripPrNotes(body)).toBe(body)
   })
 })
 

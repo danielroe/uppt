@@ -9,7 +9,7 @@
 //   GITHUB_TOKEN           required (tag push, release create, workflow dispatch)
 //   GITHUB_REPOSITORY      "owner/repo" (set automatically inside Actions)
 //   PR_BODY                PR body, used as release notes minus the unedited
-//                          timetable line
+//                          timetable line and the `pr-notes` block
 //   PUBLISH_WORKFLOW       workflow filename to dispatch (default: release.yml)
 //   BASE_BRANCH            branch the release PR was merged into
 //   DEFAULT_BRANCH         the repo's default branch. When BASE_BRANCH differs
@@ -34,7 +34,7 @@ import { runMain } from './_cli.ts'
 import { parseDistTags } from './_dist-tags.ts'
 import { isPrerelease, isSemver, resolveCurrentVersion, resolveWorkspaces } from './_workspaces.ts'
 import { coordinationTag, deriveReleaseSet, packageTag, releaseTitle, serialiseReleases } from './_independent.ts'
-import { getAllTags, stripPlaceholderTimetable } from './update-changelog.ts'
+import { getAllTags, stripPlaceholderTimetable, stripPrNotes } from './update-changelog.ts'
 
 /**
  * dist-tags the publish job should use, and hence whether this release is the
@@ -121,6 +121,10 @@ function createTag (repo: string, tag: string, sha: string, env: NodeJS.ProcessE
   ], { env })
 }
 
+function releaseNotes () {
+  return stripPrNotes(stripPlaceholderTimetable(process.env.PR_BODY ?? ''))
+}
+
 function mainIndependent (repo: string, ghEnv: NodeJS.ProcessEnv) {
   const packagesInput = process.env.PACKAGES?.trim() ?? ''
   if (!packagesInput) throw new Error('`mode: independent` requires the `packages` input.')
@@ -158,7 +162,7 @@ function mainIndependent (repo: string, ghEnv: NodeJS.ProcessEnv) {
     }
   }
 
-  const body = stripPlaceholderTimetable(process.env.PR_BODY ?? '')
+  const body = releaseNotes()
   // A mixed set (some prerelease, some stable) still deserves to be latest,
   // so the prerelease check requires every released package to qualify.
   const flags = latestFlags({
@@ -207,7 +211,7 @@ export function main () {
   const sha = capture('git', ['rev-parse', 'HEAD'])
   createTag(repo, tag, sha, ghEnv)
 
-  const body = stripPlaceholderTimetable(process.env.PR_BODY ?? '')
+  const body = releaseNotes()
   run('gh', ['release', 'create', tag, '--title', tag, '--notes', body, ...flags], { env: ghEnv })
 
   const workflow = process.env.PUBLISH_WORKFLOW || 'release.yml'

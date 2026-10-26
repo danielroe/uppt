@@ -20,6 +20,7 @@ const ENV_KEYS = [
   'MODE',
   'SCOPES',
   'TITLE',
+  'PR_NOTES',
 ] as const
 
 interface FakeCommit {
@@ -658,6 +659,82 @@ describe('lockstep main', () => {
     const createRef = calls.find(c => c.method === 'POST' && c.path.endsWith('/git/refs'))!
     expect(createRef.body).toMatchObject({ ref: 'refs/heads/release/v1.3.0', sha: 'commit-sha' })
   })
+
+  it('adds pr-notes below the timetable of a new release PR', async () => {
+    process.env.PR_NOTES = '[latest `{base}` build](https://example.com/?branch={base}) for v{version} {other}\n'
+    await main()
+    expect(prBody()).toContain([
+      '> v1.3.0 is the next minor release.',
+      '>',
+      '> **Timetable**: to be announced.',
+      '',
+      '<!-- uppt:pr-notes:start -->',
+      '[latest `main` build](https://example.com/?branch=main) for v1.3.0 {other}',
+      '<!-- uppt:pr-notes:end -->',
+      '',
+      '## 👉 Changelog',
+    ].join('\n'))
+  })
+
+  it('refreshes pr-notes in an existing release PR', async () => {
+    process.env.PR_NOTES = 'new notes'
+    api.openPRs = [{
+      number: 9,
+      body: '> keep me\n\n<!-- uppt:pr-notes:start -->\nold notes\n<!-- uppt:pr-notes:end -->\n\n> and me\n\n## 👉 Changelog\n\nold',
+      head: { ref: 'release/v1.3.0', repo: { full_name: 'owner/repo' } },
+      base: { ref: 'main' },
+      updated_at: '2024-01-02T00:00:00Z',
+    }]
+    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.3.0') })
+    await main()
+    expect(prBody()).toContain('> keep me\n\n<!-- uppt:pr-notes:start -->\nnew notes\n<!-- uppt:pr-notes:end -->\n\n> and me\n\n## 👉 Changelog')
+  })
+
+  it('removes pr-notes from an existing release PR once the input is unset', async () => {
+    api.openPRs = [{
+      number: 9,
+      body: '> keep me\n\n<!-- uppt:pr-notes:start -->\nold notes\n<!-- uppt:pr-notes:end -->\n\n## 👉 Changelog\n\nold',
+      head: { ref: 'release/v1.3.0', repo: { full_name: 'owner/repo' } },
+      base: { ref: 'main' },
+      updated_at: '2024-01-02T00:00:00Z',
+    }]
+    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.3.0') })
+    await main()
+    expect(prBody()).toMatch(/^> keep me\n\n## 👉 Changelog/)
+  })
+
+  it('leaves an existing preamble without a pr-notes block alone', async () => {
+    process.env.PR_NOTES = 'new notes'
+    api.openPRs = [{
+      number: 9,
+      body: '> keep me\n\n## 👉 Changelog\n\nold',
+      head: { ref: 'release/v1.3.0', repo: { full_name: 'owner/repo' } },
+      base: { ref: 'main' },
+      updated_at: '2024-01-02T00:00:00Z',
+    }]
+    releaseBranch('release/v1.3.0', { 'package.json': pkgJson('1.3.0') })
+    await main()
+    expect(prBody()).toMatch(/^> keep me\n\n## 👉 Changelog/)
+  })
+
+  it('adds pr-notes to a new PR that inherits a superseded preamble', async () => {
+    process.env.PR_NOTES = 'new notes'
+    api.openPRs = [{
+      number: 3,
+      body: '> old intro\n\n## 👉 Changelog\n\nstuff',
+      head: { ref: 'release/v1.2.4', repo: { full_name: 'owner/repo' } },
+      base: { ref: 'main' },
+      updated_at: '2024-01-02T00:00:00Z',
+    }]
+    await main()
+    expect(prBody()).toMatch(/^> old intro\n\n<!-- uppt:pr-notes:start -->\nnew notes\n<!-- uppt:pr-notes:end -->\n\n## 👉 Changelog/)
+  })
+
+  it('keeps the leading indentation of pr-notes', async () => {
+    process.env.PR_NOTES = '\n    indented code\n'
+    await main()
+    expect(prBody()).toContain('<!-- uppt:pr-notes:start -->\n    indented code\n<!-- uppt:pr-notes:end -->')
+  })
 })
 
 describe('lockstep main with a hand-edited version', () => {
@@ -994,6 +1071,19 @@ describe('independent main', () => {
     expect(prBody()).toContain('> lockstep intro')
   })
 
+  it('adds pr-notes to a pending PR that inherits a superseded preamble', async () => {
+    process.env.PR_NOTES = 'new notes'
+    api.openPRs = [{
+      number: 5,
+      body: '> lockstep intro',
+      head: { ref: 'release/v1.2.4', repo: { full_name: 'owner/repo' } },
+      base: { ref: 'main' },
+      updated_at: '2024-01-02T00:00:00Z',
+    }]
+    await main()
+    expect(prBody()).toMatch(/^> lockstep intro\n\n<!-- uppt:pr-notes:start -->\nnew notes\n<!-- uppt:pr-notes:end -->/)
+  })
+
   it('updates an existing pending PR and keeps its preamble', async () => {
     api.openPRs = [{
       number: 8,
@@ -1044,5 +1134,11 @@ describe('independent main', () => {
     process.env.PRERELEASE = 'rc'
     await main()
     expect(blobContents().map(c => JSON.parse(c).version)).toEqual(['1.1.0-rc.0', '2.0.1-rc.0'])
+  })
+
+  it('adds pr-notes to a new pending PR', async () => {
+    process.env.PR_NOTES = 'notes for {base} at {version}'
+    await main()
+    expect(prBody()).toContain('> **Timetable**: to be announced.\n\n<!-- uppt:pr-notes:start -->\nnotes for main at {version}\n<!-- uppt:pr-notes:end -->\n\n## 👉 ')
   })
 })

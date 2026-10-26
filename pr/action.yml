@@ -47,6 +47,10 @@ inputs:
     description: 'Whether to run when the repository is a fork. Defaults to `false` so a fork of a repo using uppt does not open release PRs of its own.'
     required: false
     default: 'false'
+  pr-notes:
+    description: 'Markdown to show in the release PR body below the timetable, such as links to preview builds. `{base}` is replaced with the base branch and, in lockstep mode, `{version}` with the next version. The block is refreshed on every run and left out of the GitHub release notes.'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -107,4 +111,5 @@ runs:
         MODE: ${{ inputs.mode }}
         SCOPES: ${{ inputs.scopes }}
         TITLE: ${{ inputs.title }}
+        PR_NOTES: ${{ inputs.pr-notes }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/update-changelog.ts
