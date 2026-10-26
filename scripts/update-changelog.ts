@@ -25,6 +25,9 @@
 //   SCOPES             newline-separated "<package-name>: <scope> ..."
 //                      overrides for routing commit scopes to workspaces
 //                      in independent mode
+//   TITLE              release PR title and commit message template, with
+//                      `{version}` in lockstep mode and `{count}` /
+//                      `{packages}` in independent mode
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
@@ -1235,6 +1238,16 @@ export function buildIndependentBody (
   return lines.join('\n').trimEnd()
 }
 
+function renderTitle (template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (match, key: string) => {
+    if (!Object.hasOwn(vars, key)) {
+      const known = Object.keys(vars).map(k => `\`{${k}}\``).join(', ')
+      throw new Error(`Unknown placeholder \`${match}\` in the \`title\` input; expected ${known}.`)
+    }
+    return vars[key]!
+  })
+}
+
 export async function main () {
   const dryRun = Boolean(process.env.DRY_RUN)
   const repo = getRepo()
@@ -1308,6 +1321,7 @@ export async function main () {
   }
 
   const newVersion = pinned?.version ?? computedVersion
+  const title = renderTitle(process.env.TITLE?.trim() || 'v{version}', { version: newVersion })
   const bump = pinned ? bumpBetween(currentVersion, newVersion) : determineBump(commits)
   const releaseBranch = pinned?.pr.head ?? `release/v${newVersion}`
 
@@ -1345,7 +1359,7 @@ export async function main () {
     const synced = await syncReleaseBranch(repo, {
       base: baseBranch,
       branch: releaseBranch,
-      message: `v${newVersion}`,
+      message: title,
       files: buildBumpFileSet({ monorepo, workspaces, rootPkg, rootPkgSource, currentVersion, newVersion }),
       keepOtherChanges: true,
       isCurrent: (branch, desired) => sameManifest(branch, desired),
@@ -1403,7 +1417,7 @@ export async function main () {
     return
   }
 
-  await upsertReleasePR(repo, { currentPR, title: `v${newVersion}`, head: releaseBranch, base: baseBranch, body })
+  await upsertReleasePR(repo, { currentPR, title, head: releaseBranch, base: baseBranch, body })
 }
 
 async function runIndependent (packagesInput: string): Promise<void> {
@@ -1474,7 +1488,10 @@ async function runIndependent (packagesInput: string): Promise<void> {
   const repo = getRepo()
   const baseBranch = getCurrentBranch()
   const releaseBranch = `release/${baseBranch}-pending`
-  const title = `chore: release ${plan.releases.length} package${plan.releases.length === 1 ? '' : 's'}`
+  const title = renderTitle(process.env.TITLE?.trim() || 'chore: release {count} {packages}', {
+    count: String(plan.releases.length),
+    packages: plan.releases.length === 1 ? 'package' : 'packages',
+  })
 
   console.log(`Base branch: ${baseBranch}`)
   console.log(`Release branch: ${releaseBranch}`)

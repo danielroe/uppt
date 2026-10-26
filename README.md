@@ -168,6 +168,7 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | `packages` | _(unset)_ | Newline-separated list of publishable workspace directories (paths or globs, e.g. `packages/*`). See [Monorepo support](#monorepo-support). |
 | `allow-forks` | `false` | By default the action skips on forks so they don't open release PRs of their own. |
 | `prerelease` | _(unset)_ | One-shot prerelease identifier (`beta`, `rc`, or a bare number). See [Prereleases](#prereleases). |
+| `title` | `v{version}` | Template for the release PR title and commit message, e.g. `chore(release): v{version}`. In [independent mode](#independent-versioning-experimental) the placeholders are `{count}` and `{packages}` (`package` or `packages`), and the default is `chore: release {count} {packages}`. |
 </details>
 
 <details>

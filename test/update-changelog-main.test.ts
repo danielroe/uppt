@@ -19,6 +19,7 @@ const ENV_KEYS = [
   'PRERELEASE',
   'MODE',
   'SCOPES',
+  'TITLE',
 ] as const
 
 interface FakeCommit {
@@ -281,6 +282,21 @@ describe('lockstep main', () => {
     expect(prBody()).toContain('- add a thing (#7)')
     expect(prBody()).toContain('- Ada (@ada)')
     expect(prBody()).toContain('/compare/v1.2.3...v1.3.0)')
+  })
+
+  it('uses a custom title for the PR and the release commit', async () => {
+    process.env.TITLE = 'chore(release): v{version}'
+    await main()
+    const created = calls.find(c => c.method === 'POST' && c.path.endsWith('/pulls'))!
+    expect(created.body).toMatchObject({ title: 'chore(release): v1.3.0' })
+    const commit = calls.find(c => c.method === 'POST' && c.path === '/repos/owner/repo/git/commits')!
+    expect(commit.body).toMatchObject({ message: 'chore(release): v1.3.0' })
+  })
+
+  it('rejects an unknown title placeholder before writing anything', async () => {
+    process.env.TITLE = 'release {count} {packages}'
+    await expect(main()).rejects.toThrow('Unknown placeholder `{count}` in the `title` input; expected `{version}`.')
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([])
   })
 
   it('omits commits already released on the diverged branch', async () => {
@@ -975,6 +991,21 @@ describe('independent main', () => {
     await main()
     const created = calls.find(c => c.method === 'POST' && c.path.endsWith('/pulls'))!
     expect(created.body).toMatchObject({ title: 'chore: release 1 package' })
+  })
+
+  it('uses a custom title for the PR and the release commit', async () => {
+    process.env.TITLE = 'chore(release): {count} {packages}'
+    await main()
+    const created = calls.find(c => c.method === 'POST' && c.path.endsWith('/pulls'))!
+    expect(created.body).toMatchObject({ title: 'chore(release): 2 packages' })
+    const commit = calls.find(c => c.method === 'POST' && c.path === '/repos/owner/repo/git/commits')!
+    expect(commit.body).toMatchObject({ message: 'chore(release): 2 packages' })
+  })
+
+  it('rejects a lockstep-only title placeholder', async () => {
+    process.env.TITLE = 'v{version}'
+    await expect(main()).rejects.toThrow('Unknown placeholder `{version}` in the `title` input; expected `{count}`, `{packages}`.')
+    expect(calls.filter(c => c.method !== 'GET')).toEqual([])
   })
 
   it('makes no writes in dry-run mode', async () => {
