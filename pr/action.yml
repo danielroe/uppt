@@ -48,7 +48,7 @@ inputs:
     required: false
     default: 'false'
   pr-notes:
-    description: 'Markdown to show in the release PR body below the timetable, such as links to preview builds. `{base}` is replaced with the base branch. The block is refreshed on every run and left out of the GitHub release notes.'
+    description: 'Markdown to show in the release PR body below the timetable, such as links to preview builds. `{base}` is replaced with the base branch and, in lockstep mode, `{version}` with the next version. The block is refreshed on every run and left out of the GitHub release notes.'
     required: false
     default: ''
 

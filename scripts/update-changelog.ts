@@ -29,8 +29,8 @@
 //                      `{version}` in lockstep mode and `{count}` /
 //                      `{packages}` in independent mode
 //   PR_NOTES           Markdown kept in a marked block of the release PR
-//                      preamble and refreshed on every run; `{base}` is
-//                      replaced with the base branch
+//                      preamble and refreshed on every run, with `{base}`
+//                      and, in lockstep mode, `{version}`
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
@@ -1105,8 +1105,9 @@ export function stripPrNotes (body: string): string {
   return setPrNotes(body, '')
 }
 
-function prNotes (baseBranch: string): string {
-  return (process.env.PR_NOTES ?? '').trim().replaceAll('{base}', baseBranch)
+function prNotes (vars: { base: string, version?: string }): string {
+  return (process.env.PR_NOTES ?? '').trim()
+    .replace(/\{(base|version)\}/g, (match, key: 'base' | 'version') => vars[key] ?? match)
 }
 
 function bumpBetween (from: string, to: string): BumpLevel {
@@ -1417,7 +1418,7 @@ export async function main () {
     ?.replace(/^> v\S+ is the next (?:major|minor|patch) release\.$/m, intro)
   const preamble = setPrNotes(
     existingPreamble || `${intro}\n>\n${TIMETABLE_PLACEHOLDER}`,
-    prNotes(baseBranch),
+    prNotes({ base: baseBranch, version: newVersion }),
     !existingPreamble,
   )
 
@@ -1559,7 +1560,7 @@ async function runIndependent (packagesInput: string): Promise<void> {
   const existingPreamble = extractPreamble(currentPR?.body) || seedPreamble
   const preamble = setPrNotes(
     existingPreamble || `> The next set of package releases, covering all packages with unreleased changes.\n>\n${TIMETABLE_PLACEHOLDER}`,
-    prNotes(baseBranch),
+    prNotes({ base: baseBranch }),
     !existingPreamble,
   )
 

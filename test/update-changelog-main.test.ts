@@ -661,7 +661,7 @@ describe('lockstep main', () => {
   })
 
   it('adds pr-notes below the timetable of a new release PR', async () => {
-    process.env.PR_NOTES = '[latest `{base}` build](https://example.com/?branch={base})\n'
+    process.env.PR_NOTES = '[latest `{base}` build](https://example.com/?branch={base}) for v{version} {other}\n'
     await main()
     expect(prBody()).toContain([
       '> v1.3.0 is the next minor release.',
@@ -669,7 +669,7 @@ describe('lockstep main', () => {
       '> **Timetable**: to be announced.',
       '',
       '<!-- uppt:pr-notes:start -->',
-      '[latest `main` build](https://example.com/?branch=main)',
+      '[latest `main` build](https://example.com/?branch=main) for v1.3.0 {other}',
       '<!-- uppt:pr-notes:end -->',
       '',
       '## 👉 Changelog',
@@ -1105,8 +1105,8 @@ describe('independent main', () => {
   })
 
   it('adds pr-notes to a new pending PR', async () => {
-    process.env.PR_NOTES = 'notes for {base}'
+    process.env.PR_NOTES = 'notes for {base} at {version}'
     await main()
-    expect(prBody()).toContain('> **Timetable**: to be announced.\n\n<!-- uppt:pr-notes:start -->\nnotes for main\n<!-- uppt:pr-notes:end -->\n\n## 👉 ')
+    expect(prBody()).toContain('> **Timetable**: to be announced.\n\n<!-- uppt:pr-notes:start -->\nnotes for main at {version}\n<!-- uppt:pr-notes:end -->\n\n## 👉 ')
   })
 })

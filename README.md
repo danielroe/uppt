@@ -179,7 +179,7 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | `allow-forks` | `false` | By default the action skips on forks so they don't open release PRs of their own. |
 | `prerelease` | _(unset)_ | One-shot prerelease identifier (`beta`, `rc`, or a bare number). See [Prereleases](#prereleases). |
 | `title` | `v{version}` | Template for the release PR title and commit message, e.g. `chore(release): v{version}`. In [independent mode](#independent-versioning-experimental) the placeholders are `{count}` and `{packages}` (`package` or `packages`), and the default is `chore: release {count} {packages}`. |
-| `pr-notes` | _(unset)_ | Markdown to show in the release PR body below the timetable, such as links to preview builds. `{base}` is replaced with the base branch. See below. |
+| `pr-notes` | _(unset)_ | Markdown to show in the release PR body below the timetable, such as links to preview builds. `{base}` is replaced with the base branch and, outside [independent mode](#independent-versioning-experimental), `{version}` with the next version (e.g. `1.3.0`). See below. |
 
 uppt keeps `pr-notes` in a marked block of the release PR body, refreshes it on every run, and leaves it out of the GitHub release notes. For example, if [pkg.pr.new](https://github.com/stackblitz-labs/pkg.pr.new) runs on pushes to your base branches, you can point at the latest build of the base branch:
 
