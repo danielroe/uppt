@@ -136,7 +136,7 @@ runs:
       env:
         PACK_OUT_DIR: ${{ runner.temp }}/uppt-pack
         PACKAGES: ${{ inputs.packages }}
-        DONT_SORT_PACKAGES: ${{ inputs.dontSortPackages }}
+        DONT_SORT_PACKAGES: ${{ inputs.dont-sort-packages }}
         RELEASES: ${{ inputs.releases }}
         NIGHTLY: ${{ inputs.nightly }}
         NIGHTLY_SUFFIX: ${{ inputs.nightly-suffix }}
