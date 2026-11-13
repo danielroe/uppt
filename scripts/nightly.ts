@@ -107,7 +107,7 @@ function git (...args: string[]): string {
   return execFileSync('git', args, { encoding: 'utf8' }).trim()
 }
 
-export function applyNightly (rootDir: string, opts: { packagesInput: string, dontSortPackages: boolean, suffix?: string, aliases?: string }): NightlyTarget[] {
+export function applyNightly (rootDir: string, opts: { packagesInput: string, dontSortPackages?: boolean, suffix?: string, aliases?: string }): NightlyTarget[] {
   const suffix = validateSuffix(opts.suffix || DEFAULT_SUFFIX)
   const aliases = parseAliases(opts.aliases ?? '', suffix)
 
