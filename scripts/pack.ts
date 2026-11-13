@@ -17,7 +17,8 @@
 //   GITHUB_REF       must be `refs/tags/v*` (set automatically)
 //   PACKAGES         newline-separated list of publishable workspace
 //                    paths/globs; when set, the script packs each
-//                    listed workspace instead of the root.
+//                    listed workspace instead of the root, dependencies
+//                    before their dependents.
 //   RELEASES         optional JSON payload emitted by `uppt/release` in
 //                    independent mode: an ordered array of
 //                    `{ name, version, dir }`. When set, exactly those
@@ -35,6 +36,7 @@ import { resolve } from 'node:path'
 
 import { runMain } from './_cli.ts'
 import { parseFilenames } from './_pack-json.ts'
+import { buildDependencyGraph, topologicalOrder } from './_dependency-graph.ts'
 import { resolveWorkspaces } from './_workspaces.ts'
 import { applyNightly } from './nightly.ts'
 import { COORDINATION_TAG_RE, releasesFromEnv, type ReleaseEntry } from './_independent.ts'
@@ -67,6 +69,12 @@ function releaseTargets (rootDir: string, releases: ReleaseEntry[]): Array<{ nam
   })
 }
 
+function workspaceTargets (rootDir: string, packagesInput: string): Array<{ name: string, cwd: string }> {
+  const workspaces = resolveWorkspaces(rootDir, packagesInput)
+  const byName = new Map(workspaces.map(ws => [ws.name, ws]))
+  return topologicalOrder(buildDependencyGraph(workspaces)).map(name => ({ name, cwd: byName.get(name)!.dir }))
+}
+
 export function main () {
   const ref = process.env.GITHUB_REF ?? ''
   const releases = releasesFromEnv(process.env.RELEASES)
@@ -94,14 +102,14 @@ export function main () {
 
   const hasPnpmLock = existsSync(resolve(process.cwd(), 'pnpm-lock.yaml'))
   const packagesInput = process.env.PACKAGES?.trim() ?? ''
-  if (nightly) {
-    applyNightly(process.cwd(), { packagesInput, suffix: process.env.NIGHTLY_SUFFIX?.trim(), aliases: process.env.NIGHTLY_ALIASES })
-  }
   const targets = releases
     ? releaseTargets(process.cwd(), releases)
     : packagesInput.length
-      ? resolveWorkspaces(process.cwd(), packagesInput).map(ws => ({ name: ws.name, cwd: ws.dir }))
+      ? workspaceTargets(process.cwd(), packagesInput)
       : [{ name: '<root>', cwd: process.cwd() }]
+  if (nightly) {
+    applyNightly(process.cwd(), { packagesInput, suffix: process.env.NIGHTLY_SUFFIX?.trim(), aliases: process.env.NIGHTLY_ALIASES })
+  }
 
   const filenames: string[] = []
   for (const target of targets) {

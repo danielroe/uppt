@@ -1,4 +1,5 @@
-// Workspace dependency graph for the independent-versioning path.
+// Workspace dependency graph, used to order packing and, in the
+// independent-versioning path, to propagate releases.
 //
 // When package A is bumped, any package B that pins A via a
 // `workspace:` specifier must also be released, or B's next published
@@ -68,8 +69,10 @@ export function buildDependencyGraph (workspaces: Workspace[]): DependencyGraph 
  * This is what lets `propagateReleases` expand the release set in a single
  * pass: a package is visited only once everything it depends on has been
  * considered, so a chain of dependents is picked up without iterating to a
- * fixed point. Publishing does not need the order, since `uppt/publish`
- * stages every version and they go live together on approval.
+ * fixed point. `uppt/pack` packs in this order so that a `prepack` build
+ * can rely on its workspace dependencies having been built first.
+ * Publishing does not need the order, since `uppt/publish` stages every
+ * version and they go live together on approval.
  *
  * Cycles are unlikely with devDependencies excluded, but are not an error
  * and do not block a release. Tie-break: whenever no package is free of
