@@ -222,7 +222,7 @@ describe('publish', () => {
       writeFileSync(output, '')
       process.env.GITHUB_OUTPUT = output
       execFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'tar') return JSON.stringify({ name: args[1]!.includes('/b-') ? '@scope/b' : 'a', version: versionFromTarballName(args[1]!) })
+        if (cmd === 'tar') return JSON.stringify({ name: args[1]!.includes('b-') ? '@scope/b' : 'a', version: versionFromTarballName(args[1]!) })
         if (args[1] === 'ls') return 'latest: 1.0.0\n4x: 4.0.0\n'
         return ''
       })
