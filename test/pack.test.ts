@@ -9,7 +9,7 @@ vi.mock('node:child_process', () => ({ execFileSync }))
 
 const { main } = await import('../scripts/pack.ts')
 
-const PACK_ENV = ['GITHUB_REF', 'RELEASES', 'PACK_OUT_DIR', 'PACKAGES', 'DONT_SORT_PACKAGES', 'GITHUB_OUTPUT', 'NIGHTLY', 'NIGHTLY_SUFFIX', 'NIGHTLY_ALIASES'] as const
+const PACK_ENV = ['GITHUB_REF', 'RELEASES', 'PACK_OUT_DIR', 'PACKAGES', 'GITHUB_OUTPUT', 'NIGHTLY', 'NIGHTLY_SUFFIX', 'NIGHTLY_ALIASES'] as const
 
 let env: NodeJS.ProcessEnv
 let cwd: string
@@ -97,19 +97,17 @@ describe('pack', () => {
     ])
   })
 
-  it('packs each declared workspace in declared order', () => {
-    writePkg(resolve(root, 'packages/a'), { name: 'a', version: '1.2.3' })
-    writePkg(resolve(root, 'packages/b'), { name: 'b', version: '1.2.3' })
-    process.env.PACKAGES = `
-packages/b
-packages/a
-`
-    process.env.DONT_SORT_PACKAGES = 'true'
-    packsAs('a-1.2.3.tgz', 'b-1.2.3.tgz')
+  it('packs workspace dependencies before their dependents', () => {
+    writePkg(resolve(root, 'packages/core'), { name: 'core', version: '1.2.3' })
+    writePkg(resolve(root, 'packages/module'), { name: 'module', version: '1.2.3', dependencies: { core: 'workspace:*', vite: 'workspace:*' } })
+    writePkg(resolve(root, 'packages/vite'), { name: 'vite', version: '1.2.3', dependencies: { core: 'workspace:*' } })
+    process.env.PACKAGES = 'packages/*'
+    packsAs('core-1.2.3.tgz', 'vite-1.2.3.tgz', 'module-1.2.3.tgz')
     main()
     expect(execFileSync.mock.calls.map(call => call[2].cwd)).toEqual([
-      resolve(root, 'packages/b'),
-      resolve(root, 'packages/a'),
+      resolve(root, 'packages/core'),
+      resolve(root, 'packages/vite'),
+      resolve(root, 'packages/module'),
     ])
   })
 
@@ -194,6 +192,22 @@ packages/a
       })
       main()
       expect(packed).toHaveBeenCalledWith({ name: 'root-pkg-edge', version: '1.2.3-2605140905-0123456', dependencies: { nuxi: 'npm:nuxi-edge@latest' } })
+    })
+
+    it('packs workspace dependencies before their dependents', () => {
+      writePkg(resolve(root, 'packages/a'), { name: 'a', version: '1.2.3', dependencies: { b: 'workspace:*' } })
+      writePkg(resolve(root, 'packages/b'), { name: 'b', version: '1.2.3' })
+      process.env.PACKAGES = 'packages/*'
+      const packed: string[] = []
+      execFileSync.mockImplementation((cmd: string, _args: string[], opts: { cwd: string }) => {
+        if (cmd === 'git') return '0123456789abcdef 1778749542'
+        packed.push(opts.cwd)
+        const filename = `${packed.length}.tgz`
+        writeFileSync(resolve(outDir, filename), 'tarball')
+        return `{"filename":"${filename}"}`
+      })
+      main()
+      expect(packed).toEqual([resolve(root, 'packages/b'), resolve(root, 'packages/a')])
     })
 
     it('requires a branch ref', () => {

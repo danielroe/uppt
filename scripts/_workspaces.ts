@@ -53,7 +53,7 @@ export function parsePackagesInput (raw: string): string[] {
  * nothing on their own; the aggregate "matched no directories" check in
  * `resolveWorkspaces` covers the case where every pattern misses.
  */
-export function expandPackagePatterns (rootDir: string, patterns: string[], dontSortPackages = false): string[] {
+export function expandPackagePatterns (rootDir: string, patterns: string[]): string[] {
   const positive: string[] = []
   const negative: string[] = []
   for (const p of patterns) {
@@ -82,7 +82,7 @@ export function expandPackagePatterns (rootDir: string, patterns: string[], dont
       matched.delete(resolve(rootDir, match))
     }
   }
-  return dontSortPackages ? [...matched] : [...matched].sort()
+  return [...matched].sort()
 }
 
 function isGlob (pattern: string): boolean {
@@ -106,13 +106,13 @@ function isDirectoryWithPackageJson (dir: string): boolean {
  * Throws if any matched directory is missing a `name` field, or if
  * the input is empty, or if no patterns matched anything.
  */
-export function resolveWorkspaces (rootDir: string, packagesInput: string, dontSortPackages = false): Workspace[] {
+export function resolveWorkspaces (rootDir: string, packagesInput: string): Workspace[] {
   const patterns = parsePackagesInput(packagesInput)
   if (!patterns.length) {
     throw new Error('`packages` input is empty: provide one path or glob per line.')
   }
 
-  const dirs = expandPackagePatterns(rootDir, patterns, dontSortPackages)
+  const dirs = expandPackagePatterns(rootDir, patterns)
   if (!dirs.length) {
     throw new Error(
       `\`packages\` input matched no directories with a package.json.\nPatterns:\n${patterns.map(p => `  - ${p}`).join('\n')}`,

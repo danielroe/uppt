@@ -210,7 +210,6 @@ uppt keeps `pr-notes` in a marked block of the release PR body, refreshes it on 
 | --- | --- | --- |
 | `install` | `true` | Set to `false` to handle `actions/setup-node` and dependency installation yourself (pinned package manager, cached `node_modules`, hardened install policy). The caller must then put `node`, `npm`, and any package manager on PATH first. |
 | `packages` | _(unset)_ | Must match the value passed to `uppt/pr`. |
-| `dont-sort-packages` | `false` | Keep `packages` in the given order instead of sorting them alphabetically.|
 | `releases` | _(unset)_ | Independent-mode publish payload, from the workflow's `releases` dispatch input. Never set by hand. |
 | `nightly` | `false` | Pack nightly builds of the current branch. See [Nightly releases](#nightly-releases). |
 | `nightly-suffix` | `-nightly` | Suffix appended to package names for nightly builds. |
