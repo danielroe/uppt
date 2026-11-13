@@ -1,6 +1,6 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 import process from 'node:process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -222,7 +222,7 @@ describe('publish', () => {
       writeFileSync(output, '')
       process.env.GITHUB_OUTPUT = output
       execFileSync.mockImplementation((cmd: string, args: string[]) => {
-        if (cmd === 'tar') return JSON.stringify({ name: args[1]!.includes('b-') ? '@scope/b' : 'a', version: versionFromTarballName(args[1]!) })
+        if (cmd === 'tar') return JSON.stringify({ name: basename(args[1]!).startsWith('b-') ? '@scope/b' : 'a', version: versionFromTarballName(args[1]!) })
         if (args[1] === 'ls') return 'latest: 1.0.0\n4x: 4.0.0\n'
         return ''
       })
