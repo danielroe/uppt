@@ -9,7 +9,7 @@ vi.mock('node:child_process', () => ({ execFileSync }))
 
 const { main } = await import('../scripts/pack.ts')
 
-const PACK_ENV = ['GITHUB_REF', 'RELEASES', 'PACK_OUT_DIR', 'PACKAGES', 'GITHUB_OUTPUT', 'NIGHTLY', 'NIGHTLY_SUFFIX', 'NIGHTLY_ALIASES'] as const
+const PACK_ENV = ['GITHUB_REF', 'RELEASES', 'PACK_OUT_DIR', 'PACKAGES', 'DONT_SORT_PACKAGES', 'GITHUB_OUTPUT', 'NIGHTLY', 'NIGHTLY_SUFFIX', 'NIGHTLY_ALIASES'] as const
 
 let env: NodeJS.ProcessEnv
 let cwd: string
