@@ -97,6 +97,22 @@ describe('pack', () => {
     ])
   })
 
+  it('packs each declared workspace in declared order', () => {
+    writePkg(resolve(root, 'packages/a'), { name: 'a', version: '1.2.3' })
+    writePkg(resolve(root, 'packages/b'), { name: 'b', version: '1.2.3' })
+    process.env.PACKAGES = `
+packages/b
+packages/a
+`
+    process.env.DONT_SORT_PACKAGES = 'true'
+    packsAs('a-1.2.3.tgz', 'b-1.2.3.tgz')
+    main()
+    expect(execFileSync.mock.calls.map(call => call[2].cwd)).toEqual([
+      resolve(root, 'packages/b'),
+      resolve(root, 'packages/a'),
+    ])
+  })
+
   it('writes the packed filenames to GITHUB_OUTPUT', () => {
     const outputFile = resolve(root, 'gh-output')
     writeFileSync(outputFile, '')

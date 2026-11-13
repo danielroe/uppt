@@ -23,6 +23,10 @@ inputs:
     description: 'Newline-separated list of publishable workspace directories, relative to the repo root. Each line is a path or glob (e.g. `packages/*`); `!`-prefixed entries are excluded; workspaces with `"private": true` are skipped. Must match the value passed to `uppt/pr`. Omit for single-package repos.'
     required: false
     default: ''
+  dont-sort-packages:
+    description: 'Keep PACKAGES in the given order instead of sorting them alphabetically (default: false).'
+    required: false
+    default: 'false'
   releases:
     description: 'Independent-mode publish payload: the ordered JSON array of `{ name, version, dir }` entries emitted by `uppt/release` and delivered via the workflow''s `releases` dispatch input. Never set by hand. When present, exactly those workspaces are packed, in that order, and the run must be on the matching `release-YYYY-MM-DD` coordination tag.'
     required: false
@@ -132,6 +136,7 @@ runs:
       env:
         PACK_OUT_DIR: ${{ runner.temp }}/uppt-pack
         PACKAGES: ${{ inputs.packages }}
+        DONT_SORT_PACKAGES: ${{ inputs.dontSortPackages }}
         RELEASES: ${{ inputs.releases }}
         NIGHTLY: ${{ inputs.nightly }}
         NIGHTLY_SUFFIX: ${{ inputs.nightly-suffix }}

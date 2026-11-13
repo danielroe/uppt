@@ -10,23 +10,25 @@
 //   - otherwise: `npm pack`.
 //
 // Env:
-//   PACK_OUT_DIR     directory to write the `*.tgz` into (created if
-//                    missing). The action then uploads its contents as
-//                    a workflow artifact.
-//   GITHUB_OUTPUT    set by the runner; receives `files=<json array>`.
-//   GITHUB_REF       must be `refs/tags/v*` (set automatically)
-//   PACKAGES         newline-separated list of publishable workspace
-//                    paths/globs; when set, the script packs each
-//                    listed workspace instead of the root.
-//   RELEASES         optional JSON payload emitted by `uppt/release` in
-//                    independent mode: an ordered array of
-//                    `{ name, version, dir }`. When set, exactly those
-//                    workspaces are packed, in that order, and the ref
-//                    must be a `release-YYYY-MM-DD` coordination
-//                    tag instead of `vX.Y.Z`.
-//   NIGHTLY          `true` to pack nightly builds of a `refs/heads/*` ref
-//   NIGHTLY_SUFFIX   package name suffix
-//   NIGHTLY_ALIASES  external dependencies to alias to their nightlies
+//   PACK_OUT_DIR        directory to write the `*.tgz` into (created if
+//                       missing). The action then uploads its contents as
+//                       a workflow artifact.
+//   GITHUB_OUTPUT       set by the runner; receives `files=<json array>`.
+//   GITHUB_REF          must be `refs/tags/v*` (set automatically)
+//   PACKAGES            newline-separated list of publishable workspace
+//                       paths/globs; when set, the script packs each
+//                       listed workspace instead of the root.
+//   DONT_SORT_PACKAGES  keep PACKAGES in the given order instead of sorting
+//                       them alphabetically (default: false).
+//   RELEASES            optional JSON payload emitted by `uppt/release` in
+//                       independent mode: an ordered array of
+//                       `{ name, version, dir }`. When set, exactly those
+//                       workspaces are packed, in that order, and the ref
+//                       must be a `release-YYYY-MM-DD` coordination
+//                       tag instead of `vX.Y.Z`.
+//   NIGHTLY             `true` to pack nightly builds of a `refs/heads/*` ref
+//   NIGHTLY_SUFFIX      package name suffix
+//   NIGHTLY_ALIASES     external dependencies to alias to their nightlies
 
 import process from 'node:process'
 import { execFileSync } from 'node:child_process'
@@ -94,13 +96,14 @@ export function main () {
 
   const hasPnpmLock = existsSync(resolve(process.cwd(), 'pnpm-lock.yaml'))
   const packagesInput = process.env.PACKAGES?.trim() ?? ''
+  const dontSortPackages = process.env.DONT_SORT_PACKAGES === 'true'
   if (nightly) {
-    applyNightly(process.cwd(), { packagesInput, suffix: process.env.NIGHTLY_SUFFIX?.trim(), aliases: process.env.NIGHTLY_ALIASES })
+    applyNightly(process.cwd(), { packagesInput, dontSortPackages, suffix: process.env.NIGHTLY_SUFFIX?.trim(), aliases: process.env.NIGHTLY_ALIASES })
   }
   const targets = releases
     ? releaseTargets(process.cwd(), releases)
     : packagesInput.length
-      ? resolveWorkspaces(process.cwd(), packagesInput).map(ws => ({ name: ws.name, cwd: ws.dir }))
+      ? resolveWorkspaces(process.cwd(), packagesInput, dontSortPackages).map(ws => ({ name: ws.name, cwd: ws.dir }))
       : [{ name: '<root>', cwd: process.cwd() }]
 
   const filenames: string[] = []
