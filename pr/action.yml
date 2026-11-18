@@ -39,6 +39,10 @@ inputs:
     description: 'Template for the release PR title and the release branch''s commit message. Lockstep mode provides `{version}` (default `v{version}`); independent mode provides `{count}` and `{packages}`, which is `package` or `packages` to match the count (default `chore: release {count} {packages}`).'
     required: false
     default: ''
+  sections:
+    description: 'Optional changelog section headings, one per line as `<type>: <title>` (e.g. `feat: 🚀 Features`). Types left out keep their default heading.'
+    required: false
+    default: ''
   prerelease:
     description: 'One-shot prerelease identifier (e.g. `beta`, `rc`, or a bare number like `0`). When set, this run cuts or continues a prerelease: from a stable version the normal bump is applied and the identifier attached at counter 0 (`4.5.2` → `5.0.0-beta.0`); from a prerelease with the same identifier the counter increments (`5.0.0-beta.0` → `5.0.0-beta.1`). Omit for normal releases; a prerelease version with this unset graduates to its stable version. `uppt/publish` stages prereleases under a matching dist-tag (`beta`, `rc`, `next` for a bare number) so `latest` is never moved to them.'
     required: false
@@ -111,5 +115,6 @@ runs:
         MODE: ${{ inputs.mode }}
         SCOPES: ${{ inputs.scopes }}
         TITLE: ${{ inputs.title }}
+        SECTIONS: ${{ inputs.sections }}
         PR_NOTES: ${{ inputs.pr-notes }}
       run: node --experimental-strip-types ${{ github.action_path }}/../scripts/update-changelog.ts

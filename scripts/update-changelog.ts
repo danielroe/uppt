@@ -28,6 +28,8 @@
 //   TITLE              release PR title and commit message template, with
 //                      `{version}` in lockstep mode and `{count}` /
 //                      `{packages}` in independent mode
+//   SECTIONS           newline-separated "<type>: <title>" overrides for
+//                      the changelog section headings
 //   PR_NOTES           Markdown kept in a marked block of the release PR
 //                      preamble and refreshed on every run, with `{base}`
 //                      and, in lockstep mode, `{version}`
@@ -80,6 +82,41 @@ const TYPE_TITLES: Record<string, string> = {
 }
 
 const KNOWN_TYPES = new Set(Object.keys(TYPE_TITLES))
+
+/**
+ * Parse a newline-separated `sections:` input into the changelog section
+ * headings, starting from the defaults. Each non-blank line takes the
+ * shape `<type>: <title>`, split on the first colon so the title can hold
+ * colons of its own (`feat: :rocket: Features`). Lines starting with `#`
+ * are comments.
+ */
+export function parseSectionsInput (raw: string): Record<string, string> {
+  const titles = { ...TYPE_TITLES }
+  const seen = new Set<string>()
+  const lines = raw.split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.trim()
+    if (!line || line.startsWith('#')) continue
+    const colon = line.indexOf(':')
+    if (colon === -1) {
+      throw new Error(`\`sections\` entry on line ${i + 1} is missing a colon. Expected "<type>: <title>", got "${line}".`)
+    }
+    const type = line.slice(0, colon).trim()
+    const title = line.slice(colon + 1).trim()
+    if (!KNOWN_TYPES.has(type)) {
+      throw new Error(`\`sections\` entry on line ${i + 1} names an unknown type \`${type}\`. Expected one of ${[...KNOWN_TYPES].map(t => `\`${t}\``).join(', ')}.`)
+    }
+    if (!title) {
+      throw new Error(`\`sections\` entry for \`${type}\` has an empty title.`)
+    }
+    if (seen.has(type)) {
+      throw new Error(`\`sections\` entry for \`${type}\` appears more than once.`)
+    }
+    seen.add(type)
+    titles[type] = title
+  }
+  return titles
+}
 
 const isReleaseWorthy = (c: Commit) =>
   KNOWN_TYPES.has(c.type) && !(c.type === 'chore' && c.scope === 'deps')
@@ -508,6 +545,8 @@ export function formatChangelog (
      * rendered line: the section heading already names the package.
      */
     packageScopes?: string[]
+    /** Section headings by commit type, from `parseSectionsInput`. */
+    titles?: Record<string, string>
   },
 ): string {
   const grouped = new Map<string, Commit[]>()
@@ -530,7 +569,7 @@ export function formatChangelog (
   for (const type of Object.keys(TYPE_TITLES)) {
     const items = grouped.get(type)
     if (!items?.length) continue
-    lines.push(`### ${TYPE_TITLES[type]}`, '')
+    lines.push(`### ${(opts.titles ?? TYPE_TITLES)[type]}`, '')
     for (const c of items) {
       const ownScopes = c.scope.split(',').map(s => s.trim()).filter(Boolean)
       const redundant = ownScopes.length === 1 && Boolean(opts.packageScopes?.includes(ownScopes[0]!))
@@ -1209,6 +1248,7 @@ export function buildIndependentBody (
     repo: string
     preamble: string
     contributors?: Contributor[]
+    titles?: Record<string, string>
   },
 ): string {
   const releasedNames = new Set(plan.releases.map(r => r.name))
@@ -1223,6 +1263,7 @@ export function buildIndependentBody (
         fromRef: release.fromTag,
         toRef: `${release.name}@${release.newVersion}`,
         packageScopes: release.scopes,
+        titles: opts.titles,
       }), '')
     } else {
       const causes = propagationCauses(release, releasedNames)
@@ -1359,6 +1400,7 @@ export async function main () {
     repo: repo.repo,
     fromRef: latestTag,
     toRef: `v${newVersion}`,
+    titles: parseSectionsInput(process.env.SECTIONS ?? ''),
   })
 
   console.log(`Current: ${currentVersion}  ->  ${newVersion} (${bump}${pinned ? `, pinned on #${pinned.pr.number}` : ''})`)
@@ -1457,6 +1499,7 @@ export async function main () {
 async function runIndependent (packagesInput: string): Promise<void> {
   const workspaces = resolveWorkspaces(process.cwd(), packagesInput)
   const scopeOverrides = parseScopesInput(process.env.SCOPES ?? '')
+  const titles = parseSectionsInput(process.env.SECTIONS ?? '')
   const tags = getAllTags()
 
   const lockstepTag = latestLockstepTag(tags)
@@ -1570,6 +1613,7 @@ async function runIndependent (packagesInput: string): Promise<void> {
     repo: repo.repo,
     preamble,
     contributors,
+    titles,
   })
 
   if (dryRun) {

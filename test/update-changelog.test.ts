@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { resolvePinnedVersion, setPrNotes, stripPlaceholderTimetable, stripPrNotes, TIMETABLE_PLACEHOLDER, buildBumpFileSet, dropRevertedCommits, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, truncateBody, dropAlreadyReleased, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
+import { parseSectionsInput, resolvePinnedVersion, setPrNotes, stripPlaceholderTimetable, stripPrNotes, TIMETABLE_PLACEHOLDER, buildBumpFileSet, dropRevertedCommits, buildIndependentBody, determineBump, formatChangelog, buildIndependentBumpFileSet, computeIndependentPlan, extractPreamble, truncateBody, dropAlreadyReleased, incVersion, latestLockstepTag, latestTagForPackage, releaseBranchDrift, isSupersededReleaseBranch, type Commit } from '../scripts/update-changelog.ts'
 import { resolveWorkspaces } from '../scripts/_workspaces.ts'
 
 let tmp: string
@@ -953,6 +953,38 @@ describe('determineBump', () => {
     )
     expect(changelog).toContain('- ⚠️  new thing')
     expect(changelog).not.toContain('not a known type')
+  })
+
+  it('renders custom section headings and keeps the default order', () => {
+    const changelog = formatChangelog(
+      [commit({ type: 'fix', description: 'a fix' }), commit({ type: 'feat', description: 'a feature' })],
+      { owner: 'owner', repo: 'repo', fromRef: null, toRef: 'main', titles: parseSectionsInput('feat: :rocket: Features\nfix: :bug: Bug Fixes') },
+    )
+    expect(changelog).toContain('### :rocket: Features')
+    expect(changelog).toContain('### :bug: Bug Fixes')
+    expect(changelog.indexOf(':rocket: Features')).toBeLessThan(changelog.indexOf(':bug: Bug Fixes'))
+  })
+})
+
+describe('parseSectionsInput', () => {
+  it('returns the default headings for an empty input', () => {
+    expect(parseSectionsInput('')).toMatchObject({ feat: '🚀 Enhancements', fix: '🩹 Fixes' })
+  })
+
+  it('overrides the listed types and keeps the others', () => {
+    const titles = parseSectionsInput('feat: :rocket: Features\r\n\n# a comment\n  perf:  Performance  ')
+    expect(titles).toMatchObject({ feat: ':rocket: Features', perf: 'Performance', fix: '🩹 Fixes' })
+  })
+
+  it('splits on the first colon only', () => {
+    expect(parseSectionsInput('docs: Docs: guides').docs).toBe('Docs: guides')
+  })
+
+  it('rejects malformed entries', () => {
+    expect(() => parseSectionsInput('feat Features')).toThrow('missing a colon')
+    expect(() => parseSectionsInput('feature: Features')).toThrow('unknown type `feature`')
+    expect(() => parseSectionsInput('feat:')).toThrow('empty title')
+    expect(() => parseSectionsInput('feat: A\nfeat: B')).toThrow('appears more than once')
   })
 })
 

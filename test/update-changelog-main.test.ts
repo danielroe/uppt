@@ -20,6 +20,7 @@ const ENV_KEYS = [
   'MODE',
   'SCOPES',
   'TITLE',
+  'SECTIONS',
   'PR_NOTES',
 ] as const
 
@@ -284,6 +285,19 @@ describe('lockstep main', () => {
     expect(prBody()).toContain('- add a thing (#7)')
     expect(prBody()).toContain('- Ada (@ada)')
     expect(prBody()).toContain('/compare/v1.2.3...v1.3.0)')
+  })
+
+  it('uses custom section headings in the PR body', async () => {
+    process.env.SECTIONS = 'feat: :rocket: Features'
+    await main()
+    expect(prBody()).toContain('### :rocket: Features')
+    expect(prBody()).not.toContain('### 🚀 Enhancements')
+  })
+
+  it('fails on an invalid sections input before writing anything', async () => {
+    process.env.SECTIONS = 'feature: Features'
+    await expect(main()).rejects.toThrow('unknown type `feature`')
+    expect(calls.some(c => c.method !== 'GET')).toBe(false)
   })
 
   it('uses a custom title for the PR and the release commit', async () => {
@@ -1111,6 +1125,13 @@ describe('independent main', () => {
     expect(created.body).toMatchObject({ title: 'chore(release): 2 packages' })
     const commit = calls.find(c => c.method === 'POST' && c.path === '/repos/owner/repo/git/commits')!
     expect(commit.body).toMatchObject({ message: 'chore(release): 2 packages' })
+  })
+
+  it('uses custom section headings in each package changelog', async () => {
+    process.env.SECTIONS = 'feat: :rocket: Features'
+    await main()
+    expect(prBody()).toContain('### :rocket: Features')
+    expect(prBody()).not.toContain('🚀 Enhancements')
   })
 
   it('rejects a lockstep-only title placeholder', async () => {
