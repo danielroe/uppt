@@ -20,6 +20,7 @@ const ENV_KEYS = [
   'MODE',
   'SCOPES',
   'TITLE',
+  'SECTIONS',
   'PR_NOTES',
 ] as const
 
@@ -284,6 +285,40 @@ describe('lockstep main', () => {
     expect(prBody()).toContain('- add a thing (#7)')
     expect(prBody()).toContain('- Ada (@ada)')
     expect(prBody()).toContain('/compare/v1.2.3...v1.3.0)')
+  })
+
+  it('uses custom section headings in the PR body', async () => {
+    process.env.SECTIONS = 'feat: :rocket: Features'
+    await main()
+    expect(prBody()).toContain('### :rocket: Features')
+    expect(prBody()).not.toContain('### 🚀 Enhancements')
+  })
+
+  it('uses custom contributor headings in the PR body', async () => {
+    git.tags = []
+    process.env.SECTIONS = 'contributors: :green_heart: Contributors\nnew-contributors: :wave: New Contributors'
+    await main()
+    expect(prBody()).toContain('### :wave: New Contributors\n\n- Ada (@ada)')
+    expect(prBody()).toContain('### :green_heart: Contributors\n\n- Ada (@ada)')
+    expect(prBody()).not.toContain('❤️')
+  })
+
+  it('fails on an invalid sections input before writing anything', async () => {
+    process.env.SECTIONS = 'feature: Features'
+    await expect(main()).rejects.toThrow('unknown type `feature`')
+    expect(calls.some(c => c.method !== 'GET')).toBe(false)
+  })
+
+  it('fails on an invalid sections input on a release merge too', async () => {
+    process.env.SECTIONS = 'feature: Features'
+    api.prsForHead = [{ head: { ref: 'release/v1.2.3' }, merged_at: '2024-01-01T00:00:00Z' }]
+    await expect(main()).rejects.toThrow('unknown type `feature`')
+  })
+
+  it('fails on an invalid sections input even with nothing to release', async () => {
+    process.env.SECTIONS = 'feature: Features'
+    git.commits = [{ ...FEAT, subject: 'chore(deps): bump something' }]
+    await expect(main()).rejects.toThrow('unknown type `feature`')
   })
 
   it('uses a custom title for the PR and the release commit', async () => {
@@ -1111,6 +1146,20 @@ describe('independent main', () => {
     expect(created.body).toMatchObject({ title: 'chore(release): 2 packages' })
     const commit = calls.find(c => c.method === 'POST' && c.path === '/repos/owner/repo/git/commits')!
     expect(commit.body).toMatchObject({ message: 'chore(release): 2 packages' })
+  })
+
+  it('uses custom section headings in each package changelog', async () => {
+    process.env.SECTIONS = 'feat: :rocket: Features'
+    git.commits = [
+      { ...FEAT, subject: 'feat(a): add a thing (#7)' },
+      { ...FEAT, hash: 'd'.repeat(40), short: 'ddddddd', subject: 'feat(b): add another thing (#8)' },
+    ]
+    git.revList = [FEAT.hash, 'd'.repeat(40)]
+    await main()
+    const [, a, b] = prBody().split(/^### [ab] \(/m)
+    expect(a).toContain('### :rocket: Features')
+    expect(b).toContain('### :rocket: Features')
+    expect(prBody()).not.toContain('🚀 Enhancements')
   })
 
   it('rejects a lockstep-only title placeholder', async () => {
