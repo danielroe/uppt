@@ -1322,6 +1322,8 @@ export async function main () {
   const dryRun = Boolean(process.env.DRY_RUN)
   const repo = getRepo()
   const baseBranch = getCurrentBranch()
+  // Validate before any early return, so a typo fails on the push that introduced it.
+  const titles = parseSectionsInput(process.env.SECTIONS ?? '')
 
   const headSha = git('rev-parse', 'HEAD')
   if (await isReleaseMergeCommit(repo, headSha)) {
@@ -1340,12 +1342,10 @@ export async function main () {
     if (!monorepo) {
       throw new Error('`mode: independent` requires the `packages` input.')
     }
-    await runIndependent(packagesInput)
+    await runIndependent(packagesInput, titles)
     return
   }
 
-  // Validate before the no-release return, so a typo fails on the push that introduced it.
-  const titles = parseSectionsInput(process.env.SECTIONS ?? '')
   const latestTag = getLatestTag()
 
   const commits = getCommitsSince(latestTag).filter(isReleaseWorthy)
@@ -1498,10 +1498,9 @@ export async function main () {
   await upsertReleasePR(repo, { currentPR, title, head: releaseBranch, base: baseBranch, body })
 }
 
-async function runIndependent (packagesInput: string): Promise<void> {
+async function runIndependent (packagesInput: string, titles: Record<string, string>): Promise<void> {
   const workspaces = resolveWorkspaces(process.cwd(), packagesInput)
   const scopeOverrides = parseScopesInput(process.env.SCOPES ?? '')
-  const titles = parseSectionsInput(process.env.SECTIONS ?? '')
   const tags = getAllTags()
 
   const lockstepTag = latestLockstepTag(tags)

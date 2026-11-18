@@ -300,6 +300,12 @@ describe('lockstep main', () => {
     expect(calls.some(c => c.method !== 'GET')).toBe(false)
   })
 
+  it('fails on an invalid sections input on a release merge too', async () => {
+    process.env.SECTIONS = 'feature: Features'
+    api.prsForHead = [{ head: { ref: 'release/v1.2.3' }, merged_at: '2024-01-01T00:00:00Z' }]
+    await expect(main()).rejects.toThrow('unknown type `feature`')
+  })
+
   it('fails on an invalid sections input even with nothing to release', async () => {
     process.env.SECTIONS = 'feature: Features'
     git.commits = [{ ...FEAT, subject: 'chore(deps): bump something' }]
