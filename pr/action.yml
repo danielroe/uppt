@@ -40,7 +40,7 @@ inputs:
     required: false
     default: ''
   sections:
-    description: 'Optional changelog section headings, one per line as `<type>: <title>` (e.g. `feat: 🚀 Features`). Types left out keep their default heading.'
+    description: 'Optional changelog section headings, one per line as `<type>: <title>` (e.g. `feat: 🚀 Features`). `<type>` is a commit type, `contributors` or `new-contributors`. Listed commit types render first, in the order given; the rest keep their default heading and order. Lines starting with `#` are comments; a `#` later in a line is part of the title.'
     required: false
     default: ''
   prerelease:

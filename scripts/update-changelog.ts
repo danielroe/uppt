@@ -29,7 +29,7 @@
 //                      `{version}` in lockstep mode and `{count}` /
 //                      `{packages}` in independent mode
 //   SECTIONS           newline-separated "<type>: <title>" overrides for
-//                      the changelog section headings
+//                      the changelog section headings and order
 //   PR_NOTES           Markdown kept in a marked block of the release PR
 //                      preamble and refreshed on every run, with `{base}`
 //                      and, in lockstep mode, `{version}`
@@ -83,16 +83,23 @@ const TYPE_TITLES: Record<string, string> = {
 
 const KNOWN_TYPES = new Set(Object.keys(TYPE_TITLES))
 
+const CONTRIBUTOR_TITLES = {
+  'new-contributors': '🎉 New Contributors',
+  'contributors': '❤️ Contributors',
+}
+
+const SECTION_KEYS = [...KNOWN_TYPES, ...Object.keys(CONTRIBUTOR_TITLES)]
+
 /**
- * Parse a newline-separated `sections:` input into the changelog section
- * headings, starting from the defaults. Each non-blank line takes the
- * shape `<type>: <title>`, split on the first colon so the title can hold
- * colons of its own (`feat: :rocket: Features`). Lines starting with `#`
- * are comments.
+ * Parse a newline-separated `sections:` input into section heading
+ * overrides, keyed by commit type or by `contributors` /
+ * `new-contributors`, in the order they are listed. Each non-blank line
+ * takes the shape `<type>: <title>`, split on the first colon so the title
+ * can hold colons of its own (`feat: :rocket: Features`). Lines starting
+ * with `#` are comments.
  */
 export function parseSectionsInput (raw: string): Record<string, string> {
-  const titles = { ...TYPE_TITLES }
-  const seen = new Set<string>()
+  const titles: Record<string, string> = {}
   const lines = raw.split(/\r?\n/)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!.trim()
@@ -103,19 +110,34 @@ export function parseSectionsInput (raw: string): Record<string, string> {
     }
     const type = line.slice(0, colon).trim()
     const title = line.slice(colon + 1).trim()
-    if (!KNOWN_TYPES.has(type)) {
-      throw new Error(`\`sections\` entry on line ${i + 1} names an unknown type \`${type}\`. Expected one of ${[...KNOWN_TYPES].map(t => `\`${t}\``).join(', ')}.`)
+    if (!SECTION_KEYS.includes(type)) {
+      throw new Error(`\`sections\` entry on line ${i + 1} names an unknown type \`${type}\`. Expected one of ${SECTION_KEYS.map(t => `\`${t}\``).join(', ')}.`)
     }
     if (!title) {
       throw new Error(`\`sections\` entry for \`${type}\` has an empty title.`)
     }
-    if (seen.has(type)) {
+    if (Object.hasOwn(titles, type)) {
       throw new Error(`\`sections\` entry for \`${type}\` appears more than once.`)
     }
-    seen.add(type)
     titles[type] = title
   }
   return titles
+}
+
+function contributorLines (contributors: Contributor[], titles: Record<string, string> = {}): string[] {
+  const lines: string[] = []
+  const newContributors = contributors.filter(c => c.isFirstTime)
+  if (newContributors.length) {
+    lines.push(`### ${titles['new-contributors'] ?? CONTRIBUTOR_TITLES['new-contributors']}`, '', newContributors.map(c => `- ${c.name} (@${c.username})`).join('\n'), '')
+  }
+  lines.push(
+    `### ${titles.contributors ?? CONTRIBUTOR_TITLES.contributors}`,
+    '',
+    contributors.length
+      ? contributors.map(c => `- ${c.name} (@${c.username})`).join('\n')
+      : '_no contributors yet_',
+  )
+  return lines
 }
 
 const isReleaseWorthy = (c: Commit) =>
@@ -545,8 +567,12 @@ export function formatChangelog (
      * rendered line: the section heading already names the package.
      */
     packageScopes?: string[]
-    /** Section headings by commit type, from `parseSectionsInput`. Missing types keep their default. */
-    titles?: Partial<Record<string, string>>
+    /**
+     * Section heading overrides by commit type, from `parseSectionsInput`.
+     * Listed types render first in their listed order; the rest keep their
+     * default heading and order.
+     */
+    titles?: Record<string, string>
   },
 ): string {
   const grouped = new Map<string, Commit[]>()
@@ -566,7 +592,8 @@ export function formatChangelog (
   const commitUrl = (sha: string) =>
     `https://github.com/${opts.owner}/${opts.repo}/commit/${sha}`
 
-  for (const type of Object.keys(TYPE_TITLES)) {
+  const order = new Set([...Object.keys(opts.titles ?? {}), ...KNOWN_TYPES])
+  for (const type of order) {
     const items = grouped.get(type)
     if (!items?.length) continue
     lines.push(`### ${opts.titles?.[type] ?? TYPE_TITLES[type]}`, '')
@@ -1248,7 +1275,7 @@ export function buildIndependentBody (
     repo: string
     preamble: string
     contributors?: Contributor[]
-    titles?: Partial<Record<string, string>>
+    titles?: Record<string, string>
   },
 ): string {
   const releasedNames = new Set(plan.releases.map(r => r.name))
@@ -1291,19 +1318,7 @@ export function buildIndependentBody (
     lines.push('')
   }
 
-  if (opts.contributors) {
-    const newContributors = opts.contributors.filter(c => c.isFirstTime)
-    if (newContributors.length) {
-      lines.push('### 🎉 New Contributors', '', newContributors.map(c => `- ${c.name} (@${c.username})`).join('\n'), '')
-    }
-    lines.push(
-      '### ❤️ Contributors',
-      '',
-      opts.contributors.length
-        ? opts.contributors.map(c => `- ${c.name} (@${c.username})`).join('\n')
-        : '_no contributors yet_',
-    )
-  }
+  if (opts.contributors) lines.push(...contributorLines(opts.contributors, opts.titles))
 
   return lines.join('\n').trimEnd()
 }
@@ -1322,7 +1337,6 @@ export async function main () {
   const dryRun = Boolean(process.env.DRY_RUN)
   const repo = getRepo()
   const baseBranch = getCurrentBranch()
-  // Validate before any early return, so a typo fails on the push that introduced it.
   const titles = parseSectionsInput(process.env.SECTIONS ?? '')
 
   const headSha = git('rev-parse', 'HEAD')
@@ -1454,7 +1468,6 @@ export async function main () {
   // unauthenticated against public repos. We still benefit from a token
   // (5000 req/h vs 60), but don't require one for previews.
   const contributors = await getContributors(commits, repo, cutoff)
-  const newContributors = contributors.filter(c => c.isFirstTime)
 
   const currentPR = await findOpenPR(repo, releaseBranch)
   const intro = `> v${newVersion} is the next ${bump} release.`
@@ -1473,20 +1486,8 @@ export async function main () {
     '## 👉 Changelog',
     '',
     changelog,
-    ...(newContributors.length
-      ? [
-        '',
-        '### 🎉 New Contributors',
-        '',
-        newContributors.map(c => `- ${c.name} (@${c.username})`).join('\n'),
-      ]
-      : []),
     '',
-    '### ❤️ Contributors',
-    '',
-    contributors.length
-      ? contributors.map(c => `- ${c.name} (@${c.username})`).join('\n')
-      : '_no contributors yet_',
+    ...contributorLines(contributors, titles),
   ].join('\n')
 
   if (dryRun) {

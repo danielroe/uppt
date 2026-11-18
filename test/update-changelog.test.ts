@@ -828,6 +828,17 @@ describe('independent release PR', () => {
     expect(body).toContain('### ❤️ Contributors\n\n- Ada (@ada)\n- Grace (@grace)')
   })
 
+  it('renders custom contributor headings', () => {
+    const body = buildIndependentBody(fontainePlan([commit('feat(fontaine): thing')]), {
+      ...bodyOpts,
+      contributors: [{ name: 'Ada', username: 'ada', isFirstTime: true }],
+      titles: parseSectionsInput('contributors: :green_heart: Contributors\nnew-contributors: :wave: New Contributors'),
+    })
+
+    expect(body).toContain('### :wave: New Contributors\n\n- Ada (@ada)')
+    expect(body).toContain('### :green_heart: Contributors\n\n- Ada (@ada)')
+  })
+
   it('commits exactly the released manifests, preserving formatting and skipping the root', () => {
     const files = buildIndependentBumpFileSet(fontainePlan([commit('feat(fontaine): thing')]))
 
@@ -915,21 +926,23 @@ describe('independent release PR', () => {
   })
 })
 
-describe('determineBump', () => {
-  function commit (overrides: Partial<Commit>): Commit {
-    return {
-      hash: 'a'.repeat(40),
-      shortHash: 'aaaaaaa',
-      message: 'chore: thing',
-      type: 'chore',
-      scope: '',
-      description: 'thing',
-      isBreaking: false,
-      author: { name: 'Test', email: 'test@example.com' },
-      references: [],
-      ...overrides,
-    }
+function commitWith (overrides: Partial<Commit>): Commit {
+  return {
+    hash: 'a'.repeat(40),
+    shortHash: 'aaaaaaa',
+    message: 'chore: thing',
+    type: 'chore',
+    scope: '',
+    description: 'thing',
+    isBreaking: false,
+    author: { name: 'Test', email: 'test@example.com' },
+    references: [],
+    ...overrides,
   }
+}
+
+describe('determineBump', () => {
+  const commit = commitWith
 
   it('bumps major for a breaking change', () => {
     expect(determineBump([commit({}), commit({ isBreaking: true })])).toBe('major')
@@ -942,6 +955,10 @@ describe('determineBump', () => {
   it('bumps patch for anything else', () => {
     expect(determineBump([commit({ type: 'fix' })])).toBe('patch')
   })
+})
+
+describe('formatChangelog', () => {
+  const commit = commitWith
 
   it('renders breaking changes with a warning marker and skips unknown types', () => {
     const changelog = formatChangelog(
@@ -955,34 +972,42 @@ describe('determineBump', () => {
     expect(changelog).not.toContain('not a known type')
   })
 
-  it('renders custom section headings and keeps the default order', () => {
+  it('renders listed sections first, in the listed order', () => {
     const changelog = formatChangelog(
-      [commit({ type: 'fix', description: 'a fix' }), commit({ type: 'feat', description: 'a feature' })],
-      { owner: 'owner', repo: 'repo', fromRef: null, toRef: 'main', titles: parseSectionsInput('feat: :rocket: Features\nfix: :bug: Bug Fixes') },
+      [
+        commit({ type: 'docs', description: 'some docs' }),
+        commit({ type: 'perf', description: 'a speedup' }),
+        commit({ type: 'fix', description: 'a fix' }),
+        commit({ type: 'feat', description: 'a feature' }),
+      ],
+      { owner: 'owner', repo: 'repo', fromRef: null, toRef: 'main', titles: parseSectionsInput('feat: :rocket: Features\nfix: :bug: Bug Fixes\nperf: :fire: Performances') },
     )
-    expect(changelog).toContain('### :rocket: Features')
-    expect(changelog).toContain('### :bug: Bug Fixes')
-    expect(changelog.indexOf(':rocket: Features')).toBeLessThan(changelog.indexOf(':bug: Bug Fixes'))
+    const headings = changelog.split('\n').filter(line => line.startsWith('### '))
+    expect(headings).toEqual(['### :rocket: Features', '### :bug: Bug Fixes', '### :fire: Performances', '### 📖 Documentation'])
   })
 
-  it('falls back to the default heading for a type missing from titles', () => {
+  it('keeps the default heading and order for types missing from titles', () => {
     const changelog = formatChangelog(
-      [commit({ type: 'feat', description: 'a feature' }), commit({ type: 'fix', description: 'a fix' })],
-      { owner: 'owner', repo: 'repo', fromRef: null, toRef: 'main', titles: { feat: 'Features' } },
+      [commit({ type: 'fix', description: 'a fix' }), commit({ type: 'perf', description: 'a speedup' }), commit({ type: 'feat', description: 'a feature' })],
+      { owner: 'owner', repo: 'repo', fromRef: null, toRef: 'main', titles: { fix: 'Bug Fixes' } },
     )
-    expect(changelog).toContain('### Features')
-    expect(changelog).toContain('### 🩹 Fixes')
+    const headings = changelog.split('\n').filter(line => line.startsWith('### '))
+    expect(headings).toEqual(['### Bug Fixes', '### 🚀 Enhancements', '### 🔥 Performance'])
   })
 })
 
 describe('parseSectionsInput', () => {
-  it('returns the default headings for an empty input', () => {
-    expect(parseSectionsInput('')).toMatchObject({ feat: '🚀 Enhancements', fix: '🩹 Fixes' })
+  it('returns no overrides for an empty input', () => {
+    expect(parseSectionsInput('')).toEqual({})
   })
 
-  it('overrides the listed types and keeps the others', () => {
-    const titles = parseSectionsInput('feat: :rocket: Features\r\n\n# a comment\n  perf:  Performance  ')
-    expect(titles).toMatchObject({ feat: ':rocket: Features', perf: 'Performance', fix: '🩹 Fixes' })
+  it('returns the listed overrides in order, skipping blank and comment lines', () => {
+    const titles = parseSectionsInput('perf:  Performance  \r\n\n# a comment\n  feat: :rocket: Features\ncontributors: :green_heart: Contributors')
+    expect(Object.entries(titles)).toEqual([['perf', 'Performance'], ['feat', ':rocket: Features'], ['contributors', ':green_heart: Contributors']])
+  })
+
+  it('keeps a `#` inside a title', () => {
+    expect(parseSectionsInput('feat: C# Features').feat).toBe('C# Features')
   })
 
   it('splits on the first colon only', () => {

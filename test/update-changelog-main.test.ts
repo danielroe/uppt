@@ -294,6 +294,15 @@ describe('lockstep main', () => {
     expect(prBody()).not.toContain('### 🚀 Enhancements')
   })
 
+  it('uses custom contributor headings in the PR body', async () => {
+    git.tags = []
+    process.env.SECTIONS = 'contributors: :green_heart: Contributors\nnew-contributors: :wave: New Contributors'
+    await main()
+    expect(prBody()).toContain('### :wave: New Contributors\n\n- Ada (@ada)')
+    expect(prBody()).toContain('### :green_heart: Contributors\n\n- Ada (@ada)')
+    expect(prBody()).not.toContain('❤️')
+  })
+
   it('fails on an invalid sections input before writing anything', async () => {
     process.env.SECTIONS = 'feature: Features'
     await expect(main()).rejects.toThrow('unknown type `feature`')
