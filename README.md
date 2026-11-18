@@ -179,7 +179,7 @@ All subactions take a `node-version` input (default `24`; uppt needs `--experime
 | `allow-forks` | `false` | By default the action skips on forks so they don't open release PRs of their own. |
 | `prerelease` | _(unset)_ | One-shot prerelease identifier (`beta`, `rc`, or a bare number). See [Prereleases](#prereleases). |
 | `title` | `v{version}` | Template for the release PR title and commit message, e.g. `chore(release): v{version}`. In [independent mode](#independent-versioning-experimental) the placeholders are `{count}` and `{packages}` (`package` or `packages`), and the default is `chore: release {count} {packages}`. |
-| `sections` | _(unset)_ | Changelog section headings to override, one per line as `<type>: <title>`, e.g. `feat: 🚀 Features`. `<type>` is a commit type, `contributors` or `new-contributors`. Listed commit types render first, in the order given; the rest keep their default heading and order (`🚀 Enhancements`, `🔥 Performance`, `🩹 Fixes`, ...). Lines starting with `#` are comments; a `#` later in a line is part of the title. |
+| `sections` | _(unset)_ | Changelog section headings to override, one per line as `<type>: <title>`, e.g. `feat: 🚀 Features`. Listed commit types render first, in the order given; the rest keep their default heading and order. Lines starting with `#` are comments; a `#` later in a line is part of the title. See below for the accepted types. |
 | `pr-notes` | _(unset)_ | Markdown to show in the release PR body below the timetable, such as links to preview builds. `{base}` is replaced with the base branch and, outside [independent mode](#independent-versioning-experimental), `{version}` with the next version (e.g. `1.3.0`). See below. |
 
 uppt keeps `pr-notes` in a marked block of the release PR body, refreshes it on every run, and leaves it out of the GitHub release notes. For example, if [pkg.pr.new](https://github.com/stackblitz-labs/pkg.pr.new) runs on pushes to your base branches, you can point at the latest build of the base branch:
@@ -190,6 +190,26 @@ uppt keeps `pr-notes` in a marked block of the release PR body, refreshes it on 
     pr-notes: |
       Try the latest `{base}` build: `npm i https://pkg.pr.new/<owner>/<repo>/<package>@{base}`
 ```
+
+`sections` accepts these types, shown in their default order with their default headings. Any other type fails the run.
+
+| Type | Default heading |
+| --- | --- |
+| `feat` | 🚀 Enhancements |
+| `perf` | 🔥 Performance |
+| `fix` | 🩹 Fixes |
+| `refactor` | 💅 Refactors |
+| `docs` | 📖 Documentation |
+| `build` | 📦 Build |
+| `types` | 🌊 Types |
+| `chore` | 🏡 Chore |
+| `examples` | 🏀 Examples |
+| `test` | ✅ Tests |
+| `style` | 🎨 Styles |
+| `ci` | 🤖 CI |
+| `revert` | ⏪ Reverts |
+| `new-contributors` | 🎉 New Contributors |
+| `contributors` | ❤️ Contributors |
 </details>
 
 <details>
