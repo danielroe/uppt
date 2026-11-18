@@ -964,6 +964,15 @@ describe('determineBump', () => {
     expect(changelog).toContain('### :bug: Bug Fixes')
     expect(changelog.indexOf(':rocket: Features')).toBeLessThan(changelog.indexOf(':bug: Bug Fixes'))
   })
+
+  it('falls back to the default heading for a type missing from titles', () => {
+    const changelog = formatChangelog(
+      [commit({ type: 'feat', description: 'a feature' }), commit({ type: 'fix', description: 'a fix' })],
+      { owner: 'owner', repo: 'repo', fromRef: null, toRef: 'main', titles: { feat: 'Features' } },
+    )
+    expect(changelog).toContain('### Features')
+    expect(changelog).toContain('### 🩹 Fixes')
+  })
 })
 
 describe('parseSectionsInput', () => {

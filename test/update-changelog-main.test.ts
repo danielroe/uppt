@@ -300,6 +300,12 @@ describe('lockstep main', () => {
     expect(calls.some(c => c.method !== 'GET')).toBe(false)
   })
 
+  it('fails on an invalid sections input even with nothing to release', async () => {
+    process.env.SECTIONS = 'feature: Features'
+    git.commits = [{ ...FEAT, subject: 'chore(deps): bump something' }]
+    await expect(main()).rejects.toThrow('unknown type `feature`')
+  })
+
   it('uses a custom title for the PR and the release commit', async () => {
     process.env.TITLE = 'chore(release): v{version}'
     await main()
@@ -1129,8 +1135,15 @@ describe('independent main', () => {
 
   it('uses custom section headings in each package changelog', async () => {
     process.env.SECTIONS = 'feat: :rocket: Features'
+    git.commits = [
+      { ...FEAT, subject: 'feat(a): add a thing (#7)' },
+      { ...FEAT, hash: 'd'.repeat(40), short: 'ddddddd', subject: 'feat(b): add another thing (#8)' },
+    ]
+    git.revList = [FEAT.hash, 'd'.repeat(40)]
     await main()
-    expect(prBody()).toContain('### :rocket: Features')
+    const [, a, b] = prBody().split(/^### [ab] \(/m)
+    expect(a).toContain('### :rocket: Features')
+    expect(b).toContain('### :rocket: Features')
     expect(prBody()).not.toContain('🚀 Enhancements')
   })
 
