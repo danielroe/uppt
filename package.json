@@ -24,7 +24,7 @@
     },
     "packageManager": {
       "name": "pnpm",
-      "version": "12.21.0",
+      "version": "12.22.0",
       "onFail": "download"
     }
   }
