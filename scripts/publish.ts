@@ -26,6 +26,11 @@
 // publish, or written to the `dist-tags` output for `uppt/dist-tag` to
 // apply once a staged version has been approved.
 //
+// Staging is re-runnable: every tarball is attempted, a version that npm
+// reports as already staged (or already published) is skipped rather than
+// failing the run, and the step ends with a summary of what was staged,
+// skipped and failed.
+//
 // Env:
 //   NPM_ACCESS      `public` (default) or `restricted`
 //   NPM_TAG         optional dist-tag override for every tarball; a
@@ -42,20 +47,15 @@
 //                   `latest` by default) instead of staging
 
 import process from 'node:process'
-import { execFileSync, spawnSync } from 'node:child_process'
-import { appendFileSync, existsSync, readdirSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { appendFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { runMain } from './_cli.ts'
 import { addDistTags, parseDistTags, tarballManifest, type DistTagEntry } from './_dist-tags.ts'
 import { expectedTarballName, releasesFromEnv } from './_independent.ts'
 
-function run (cmd: string, args: string[]) {
-  console.log('$', cmd, ...args)
-  execFileSync(cmd, args, { stdio: 'inherit' })
-}
-
-/** `run`, but an E403 only warns. */
 function runTolerating403 (cmd: string, args: string[]) {
   console.log('$', cmd, ...args)
   const result = spawnSync(cmd, args, { stdio: ['inherit', 'inherit', 'pipe'], encoding: 'utf8' })
@@ -67,6 +67,162 @@ function runTolerating403 (cmd: string, args: string[]) {
     return
   }
   throw new Error(`Command failed: ${cmd} ${args.join(' ')} (exit ${result.status ?? result.signal})`)
+}
+
+type StageOutcome =
+  | { status: 'staged' }
+  | { status: 'skipped', detail: string }
+
+function npmSilently (args: string[]) {
+  const result = spawnSync('npm', args, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' })
+  if (result.error) throw result.error
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr }
+}
+
+function npmErrorCode (stderr: string): string | undefined {
+  return /npm error code (E[A-Z0-9]+)/.exec(stderr)?.[1]
+}
+
+function tarballDigests (tarballPath: string) {
+  const contents = readFileSync(tarballPath)
+  return {
+    shasum: createHash('sha1').update(contents).digest('hex'),
+    integrity: `sha512-${createHash('sha512').update(contents).digest('base64')}`,
+  }
+}
+
+function publishedDist (name: string, version: string) {
+  const { status, stdout, stderr } = npmSilently(['view', `${name}@${version}`, 'dist.integrity', 'dist.shasum', '--json'])
+  if (status === 0) {
+    try {
+      const parsed = JSON.parse(stdout) as { 'dist.integrity'?: string, 'dist.shasum'?: string }
+      return { integrity: parsed['dist.integrity'], shasum: parsed['dist.shasum'] }
+    }
+    catch {
+      return null
+    }
+  }
+  const code = npmErrorCode(stderr)
+  if (code === 'E404') return null
+  throw new Error(`Could not check whether ${name}@${version} is already published.${code ? ` npm view reported ${code}.` : ''}`)
+}
+
+const PENDING_STAGE_STATUSES = new Set(['staged', 'validating', 'awaiting_approval'])
+
+interface StagedEntry {
+  id: string | undefined
+  shasum: string | undefined
+}
+
+type StagedLookup =
+  | { state: 'found', entries: StagedEntry[] }
+  | { state: 'absent' }
+  | { state: 'unavailable' }
+
+interface StagedItem {
+  id?: string
+  packageName?: string
+  version?: string
+  shasum?: string
+  status?: string
+}
+
+function stagedVersion (name: string, version: string): StagedLookup {
+  const { status, stdout } = npmSilently(['stage', 'list', name, '--json'])
+  if (status !== 0) return { state: 'unavailable' }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stdout)
+  }
+  catch {
+    return { state: 'unavailable' }
+  }
+  if (!Array.isArray(parsed)) return { state: 'unavailable' }
+  const entries = (parsed as StagedItem[])
+    .filter(item => item.packageName === name && item.version === version)
+    .filter(item => item.status === undefined || PENDING_STAGE_STATUSES.has(item.status))
+    .map(({ id, shasum }) => ({ id, shasum }))
+  if (!entries.length) return { state: 'absent' }
+  return { state: 'found', entries }
+}
+
+function formatIds (entries: StagedEntry[]): string {
+  const ids = entries.map(({ id }) => id).filter((id): id is string => id !== undefined)
+  return ids.length ? ids.join(', ') : 'npm reported no id'
+}
+
+const STAGE_CONFLICT_TEXT = /Cannot stage previously published version/
+
+function resolveStageConflict (tarballPath: string, { name, version }: { name: string, version: string }, stderr: string): StageOutcome {
+  const local = tarballDigests(tarballPath)
+  const published = publishedDist(name, version)
+  if (published) {
+    const same = published.integrity ? published.integrity === local.integrity : published.shasum === local.shasum
+    if (same) return { status: 'skipped', detail: `${name}@${version} is already published` }
+    throw new Error(`${name}@${version} is already published with different contents: the registry has ${published.integrity ?? published.shasum}, this run's tarball is ${local.integrity}.`)
+  }
+  const staged = stagedVersion(name, version)
+  if (staged.state === 'found') {
+    if (staged.entries.some(entry => entry.shasum !== undefined && entry.shasum === local.shasum)) {
+      return { status: 'skipped', detail: `${name}@${version} is already staged` }
+    }
+    const ids = formatIds(staged.entries)
+    if (staged.entries.every(entry => entry.shasum === undefined)) {
+      const unverified = `${name}@${version} is already staged (${ids}), but npm reported no shasum for it, so this run could not check that the staged tarball matches.`
+      if (!STAGE_CONFLICT_TEXT.test(stderr)) {
+        throw new Error(`${unverified} npm's error was not the expected conflict, so check \`npm stage list ${name}\` and re-run this job.`)
+      }
+      console.log(`::warning::${unverified} Review it with \`npm stage list ${name}\` before approving.`)
+      return { status: 'skipped', detail: `${name}@${version} is already staged, contents unverified` }
+    }
+    throw new Error(`${name}@${version} is already staged (${ids}) with different contents. Reject each staged copy with \`npm stage reject <id>\`, then re-run this job.`)
+  }
+  if (staged.state === 'absent') {
+    throw new Error(`npm reported a conflict staging ${name}@${version}, but that version is neither published nor staged. Check \`npm stage list ${name}\` and re-run this job.`)
+  }
+  const unverified = `\`npm stage list ${name}\` failed, so this run could not check whether ${name}@${version} is already staged`
+  if (!STAGE_CONFLICT_TEXT.test(stderr)) {
+    throw new Error(`${unverified}, and npm's error was not the expected conflict. Check \`npm stage list ${name}\` and re-run this job.`)
+  }
+  console.log(`::warning::${unverified}. The version is not published, so it is probably awaiting approval; review it with \`npm stage list ${name}\` before approving.`)
+  return { status: 'skipped', detail: `${name}@${version} is already staged, contents unverified` }
+}
+
+function stageTarball (tarballPath: string, args: string[]): StageOutcome {
+  console.log('$', 'npm', ...args)
+  const result = spawnSync('npm', args, { stdio: ['inherit', 'inherit', 'pipe'], encoding: 'utf8' })
+  if (result.stderr) process.stderr.write(result.stderr)
+  if (result.error) throw result.error
+  if (result.status === 0) return { status: 'staged' }
+  const code = npmErrorCode(result.stderr)
+  if (code === 'E409') return resolveStageConflict(tarballPath, tarballManifest(tarballPath), result.stderr)
+  throw new Error(`Command failed: npm ${args.join(' ')} (exit ${result.status ?? result.signal}${code ? `, ${code}` : ''})`)
+}
+
+interface StageReport {
+  staged: string[]
+  skipped: { tarball: string, detail: string }[]
+  failed: { tarball: string, message: string }[]
+}
+
+function reportStageResults ({ staged, skipped, failed }: StageReport) {
+  const join = (items: string[]) => items.length ? items.join(', ') : 'none'
+  const skippedLines = skipped.map(({ tarball, detail }) => `${tarball} (${detail})`)
+  const failedTarballs = failed.map(({ tarball }) => tarball)
+  console.log(`Staged in this run: ${join(staged)}`)
+  console.log(`Already staged or published: ${join(skippedLines)}`)
+  console.log(`Failed: ${join(failedTarballs)}`)
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY
+  if (!summaryPath) return
+  const lines = [
+    '### npm publish',
+    '',
+    `- **Staged in this run:** ${join(staged)}`,
+    `- **Already staged or published:** ${join(skippedLines)}`,
+    `- **Failed:** ${join(failedTarballs)}`,
+  ]
+  for (const { tarball, message } of failed) lines.push(`  - \`${tarball}\`: ${message}`)
+  appendFileSync(summaryPath, `${lines.join('\n')}\n`)
 }
 
 function parseTarballFiles (raw: string): string[] {
@@ -155,17 +311,43 @@ export function main () {
   }
 
   const pending: DistTagEntry[] = []
+  const staged: string[] = []
+  const skipped: { tarball: string, detail: string }[] = []
+  const failed: { tarball: string, message: string }[] = []
   for (const tarball of tarballs) {
     const tarballPath = resolve(dir, tarball)
     if (!existsSync(tarballPath)) {
       throw new Error(`Tarball '${tarball}' is not present in ${dir}`)
     }
-    const publish = nightly ? runTolerating403 : run
-    publish('npm', [...command, tarballPath, '--provenance', '--ignore-scripts', `--access=${access}`, `--tag=${tagFor(tarball, defaultTag)}`])
+    const args = [...command, tarballPath, '--provenance', '--ignore-scripts', `--access=${access}`, `--tag=${tagFor(tarball, defaultTag)}`]
+    if (nightly) {
+      runTolerating403('npm', args)
+    }
+    else {
+      try {
+        const outcome = stageTarball(tarballPath, args)
+        if (outcome.status === 'staged') staged.push(tarball)
+        else skipped.push({ tarball, detail: outcome.detail })
+      }
+      catch (err) {
+        failed.push({ tarball, message: (err as Error).message })
+        continue
+      }
+    }
     if (!extraTags.length) continue
     const entry = { ...tarballManifest(tarballPath), tags: extraTags }
     if (nightly) addDistTags(entry)
     else pending.push(entry)
+  }
+
+  if (!nightly) {
+    reportStageResults({ staged, skipped, failed })
+    if (failed.length) {
+      throw new Error([
+        `Could not stage ${failed.length} of ${tarballs.length} package(s):`,
+        ...failed.map(({ tarball, message }) => `- ${tarball}: ${message}`),
+      ].join('\n'))
+    }
   }
 
   const githubOutput = process.env.GITHUB_OUTPUT
